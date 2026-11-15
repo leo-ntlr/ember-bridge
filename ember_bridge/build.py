@@ -130,8 +130,9 @@ def snpp_gap_days(parts: dict, snpp_last: str) -> dict[str, pd.DatetimeIndex]:
     """Suomi NPP outage days per region, found against NOAA-20 (same 13:30 orbit, 50 minutes ahead).
 
     A day is an outage day when, over all regions together, Suomi NPP saw less than half of what NOAA-20
-    saw: the satellite itself was down (NASA reported outages from 26 July to 10 August 2022, from 24 July
-    to 2 August 2024 and from 10 to 17 July 2026). Pooling the regions keeps a fire seen at the edge of
+    saw: the satellite itself was down (NASA reported an outage from 26 July 2022, data back from 10 August;
+    one on 24 July 2024, then a hold on VIIRS processing until early August; one from 10 to 17 July 2026).
+    Pooling the regions keeps a fire seen at the edge of
     one swath and the centre of the other from passing for an outage. A day when Suomi NPP has no hotspot
     at all in a region where NOAA-20 saw many is one too (data missing for that region).
     On these days the calendar takes NOAA-20 hotspots, harmonized to Suomi NPP, and the fit and the

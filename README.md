@@ -27,9 +27,24 @@ saw, over months with at least 20 Suomi NPP hotspots. The 95 % range should cont
 | NOAA-20, in sample | 312 | 3.1 % | 4.4 % | 93.9 % |
 
 Correlation with the truth on the years never seen: 0.98. Known limits: on those years the harmonized
-series is 21 % too high (48 % in the Amazon), and our leading suspect, not yet tested, is Aqua's drift
-to a later afternoon pass since its last orbit maneuvers in 2021; the 95 % ranges are too narrow out of
-sample; moving the model from forests to the savanna is the hardest transfer.
+series is 21 % too high (48 % in the Amazon); the 95 % ranges are too narrow out of sample; moving the
+model from forests to the savanna is the hardest transfer. Aqua's own hotspot counts hold steady against
+Suomi NPP (drift check below), so the bias comes from the model, not from Aqua: version 0.11 tests the
+pass-hour bins, learned while Aqua still passed at 13:30, adds a test on the early years, and fills
+Suomi NPP outages with NOAA-20 (numbers above to be updated with its build).
+
+### Orbit drift check
+
+![Hotspots seen per Suomi NPP hotspot, 2012-2026: Terra falls by 41 %, Aqua and NOAA-20 hold steady](docs/orbit-drift-check.png)
+
+Hotspots each satellite sees per Suomi NPP hotspot, against the same calendar month of 2012-2020,
+from the whole-region calendars of the app. NOAA-20, on Suomi NPP's own orbit, stays flat: the check
+works. Aqua stays within about 10 % of its 2012-2020 level, with no trend after its last orbit
+maneuver in March 2021. Terra, whose morning pass has drifted from 10:30 toward 9:00 since 2020
+([NASA Earthdata](https://www.earthdata.nasa.gov/data/alerts-outages/terra-modis-acquisition-plan-through-december-2025)),
+now sees 41 % fewer hotspots per VIIRS hotspot, 59 % fewer in the savanna, where fires burn mostly in
+the afternoon: summing raw MODIS hotspots today shows a decline in fire that is not there. Ember Bridge
+takes Terra only for 2000-2002, before the drift.
 
 ## Quick start (macOS or Linux, Python 3.9+)
 
@@ -91,8 +106,9 @@ hundreds of millions of detections fit on a laptop:
    NPP to 2026-11-01, NOAA-20 after), monthly cube on a 0.25 degree grid, fire events. On Suomi NPP
    outage days, NOAA-20 hotspots (same orbit, 50 minutes ahead) stand in, harmonized to Suomi NPP: a day
    is an outage day when, over all regions together, Suomi NPP saw less than half of what NOAA-20 saw.
-   NASA reported outages from 26 July to 10 August 2022, from 24 July to 2 August 2024 and from 10 to
-   17 July 2026; without the fill, the calendar was up to 46 % too low in those months.
+   NASA reported an outage from 26 July 2022 (data back from 10 August), one on 24 July 2024 followed by
+   a hold on all VIIRS processing (alert resolved on 5 August), and one from 10 to 17 July 2026; without
+   the fill, the calendar was up to 46 % too low in those months.
 6. **web**: compact JSON in `web/data/`, with the monthly cube split into files of about 5 MB so that
    any static host accepts them.
 
