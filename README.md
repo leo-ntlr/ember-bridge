@@ -91,7 +91,9 @@ hundreds of millions of detections fit on a laptop:
 
 ## 4. Web app
 
-Region tabs; draw a polygon or rectangle, type lat/lon + radius, or pick a watched area; month x year
+Region tabs; draw a polygon or rectangle, type lat/lon + radius, or pick a watched area (an area outside
+the region, over open water, or smaller than one 0.25 degree cell gets a note saying what is counted);
+a map legend; month x year
 calendar (harmonized or raw, hotspots or fires, counts or anomaly, cividis palette, values in cells,
 hatching for uncertainty, satellite strip); the selected month against the same month of every
 earlier year (or the same days, for the month in progress) with rank and significance; fire comparator;

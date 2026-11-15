@@ -58,6 +58,11 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 .circle-form label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); }
 .circle-form input { width: 92px; }
 .mapcard .hint { padding: 0 14px 12px; }
+.sel-note { font-size: 13px; line-height: 1.45; color: #7c2d12; background: var(--accent-soft); border: 1px solid #f5c6a8; border-radius: 8px; padding: 8px 10px; margin: 8px 0 0; }
+.mapcard .sel-note { margin: 8px 14px 0; }
+.calendar-card .sel-note { margin: 0 0 10px; }
+.sel-note[hidden] { display: none; }
+.sel-note .sel-switch { display: inline-block; margin-top: 6px; font-size: 13px; padding: 4px 10px; background: #fff; border-color: #f5c6a8; color: #7c2d12; }
 
 .controls { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: center; }
 .seg { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -112,3 +117,12 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   .cards { grid-template-columns: 1fr; }
   .big { font-size: 26px; }
 }
+
+/* Map legend (bottom left of the map) */
+.map-legend { background: rgba(255, 255, 255, .9); border-radius: 6px; padding: 4px 8px; font-size: 11px; line-height: 1.45; color: #1c2229; box-shadow: 0 1px 3px rgba(0, 0, 0, .2); }
+.map-legend .ml-row { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.map-legend .ml-title { font-weight: 600; }
+.map-legend .ml-sep { width: 8px; }
+.map-legend .ml-ramp { display: inline-block; width: 40px; height: 8px; border-radius: 2px; }
+.map-legend .ml-ring { display: inline-block; box-sizing: border-box; width: 12px; height: 12px; border-radius: 50%; border: 2.5px solid #c2410c; background: rgba(252, 196, 25, .3); }
+.map-legend .ml-dash { display: inline-block; width: 14px; border-top: 1.5px dashed #1c2229; }

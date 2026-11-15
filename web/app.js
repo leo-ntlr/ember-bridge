@@ -173,6 +173,49 @@ function maskFor(D, poly) {
   return m;
 }
 
+// The cells of a drawn or typed area, and a note when the area has no data. A cell counts when its centre is
+// inside the area. An area that holds no cell centre (smaller than one 25 km cell) takes the cells it touches.
+// The map can be panned anywhere, so an area can also fall outside the region box, where there is no data at all.
+function selectionFor(D, poly) {
+  const g = D.g, info = { mask: maskFor(D, poly), note: "", outside: false, other: null };
+  if (!poly) return info;
+  const xs = poly.map((p) => p[0]), ys = poly.map((p) => p[1]);
+  const box = { west: Math.min(...xs), east: Math.max(...xs), south: Math.min(...ys), north: Math.max(...ys) };
+  const overlaps = (r) => box.west < r.east && box.east > r.west && box.south < r.north && box.north > r.south;
+  const since = yearOf(D.tFirst);
+  if (!overlaps(g)) {
+    info.outside = true;
+    info.other = Object.keys(S.meta.regions).find((r) => r !== S.region && overlaps(S.meta.regions[r])) || null;
+    info.note = `This area is outside the ${g.label} region (dashed line on the map), so there is no data for it. ` +
+      (info.other ? `It is in the ${S.meta.regions[info.other].label} region.` : "Draw inside the dashed line, or pick another region at the top.");
+    return info;
+  }
+  const i0 = Math.max(0, Math.floor((box.south - g.south) / g.deg)), i1 = Math.min(g.nrows - 1, Math.floor((box.north - g.south) / g.deg));
+  const j0 = Math.max(0, Math.floor((box.west - g.west) / g.deg)), j1 = Math.min(g.ncols - 1, Math.floor((box.east - g.west) / g.deg));
+  let centres = 0;
+  for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+    if (pointInPolygon(g.west + (j + 0.5) * g.deg, g.south + (i + 0.5) * g.deg, poly)) centres++;
+  }
+  const notes = [];
+  if (!centres) {
+    const m = new Uint8Array(g.ncols * g.nrows), touched = new Set();
+    for (const [x, y] of poly.concat([[mean(xs), mean(ys)]])) {
+      const i = Math.floor((y - g.south) / g.deg), j = Math.floor((x - g.west) / g.deg);
+      if (i >= 0 && i < g.nrows && j >= 0 && j < g.ncols) { m[i * g.ncols + j] = 1; touched.add(i * g.ncols + j); }
+    }
+    info.mask = m;
+    notes.push(`This area is smaller than one grid square (about 25 km): the counts cover the ${touched.size === 1 ? "square" : `${touched.size} squares`} it touches.`);
+  }
+  let withData = 0;
+  for (let k = 0; k < D.cells.length; k++) if (info.mask[D.cells[k]]) withData++;
+  if (!withData) notes.push(`No hotspot has been recorded here since ${since}: open water, or land that has not burned.`);
+  if (box.west < g.west || box.east > g.east || box.south < g.south || box.north > g.north) {
+    notes.push("Part of this area is outside the region: only the part inside the dashed line is counted.");
+  }
+  info.note = notes.join(" ");
+  return info;
+}
+
 function aggregate(D, mask) {
   const T = D.T, A = { T, pred: new Float64Array(T), lo: new Float64Array(T), hi: new Float64Array(T),
     w2: new Float64Array(T), fires: new Float64Array(T), firesRaw: new Float64Array(T), raw: {}, rawTotal: new Float64Array(T) };
@@ -485,6 +528,7 @@ function renderFireCard() {
   const el = $("fireCard");
   const { y, m } = S.focus;
   const f = compareFire(y, m);
+  S.currentFire = f;
   if (!f) { el.innerHTML = `<h2>Fire comparator</h2><p class="empty">No fire events computed for this region.</p>`; return; }
   if (f.none) {
     el.innerHTML = `<h2>${f.current ? "Current fire" : "Largest fire this month"}</h2><p class="empty">No fire ${f.current ? "active in the last 14 days" : "active this month"} in this area.</p>`;
@@ -639,15 +683,21 @@ function initMap() {
   S.map.createPane("fire");
   S.map.getPane("fire").style.zIndex = 460;
   S.cellRenderer = L.canvas({ padding: 0.3 });
+  // On a Retina screen, ask GIBS for the next zoom level and show its tiles at half size, so the image is sharp.
+  // (Leaflet's detectRetina would ask for one level beyond the deepest GIBS level, hence the explicit settings.)
+  const gibsLayer = (url, deepest, opacity) => L.tileLayer(url, L.Browser.retina
+    ? { tileSize: 128, zoomOffset: 1, maxNativeZoom: deepest - 1, maxZoom: 12, opacity, attribution: GIBS_CREDIT }
+    : { maxNativeZoom: deepest, maxZoom: 12, opacity, attribution: GIBS_CREDIT });
   const bases = {
-    "NASA Blue Marble": L.tileLayer(`${GIBS}BlueMarble_NextGeneration/default/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpeg`,
-      { maxNativeZoom: 8, maxZoom: 12, opacity: 0.65, attribution: GIBS_CREDIT }),
-    [`NASA satellite image, ${day === "default" ? "latest day" : day} (NOAA-20 VIIRS)`]: L.tileLayer(
-      `${GIBS}VIIRS_NOAA20_CorrectedReflectance_TrueColor/default/${day}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`,
-      { maxNativeZoom: 9, maxZoom: 12, opacity: 0.85, attribution: GIBS_CREDIT }),
+    "NASA Blue Marble": gibsLayer(`${GIBS}BlueMarble_NextGeneration/default/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpeg`, 8, 0.9),
+    [`NASA satellite image, ${day === "default" ? "latest day" : day} (NOAA-20 VIIRS)`]: gibsLayer(
+      `${GIBS}VIIRS_NOAA20_CorrectedReflectance_TrueColor/default/${day}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`, 9, 0.95),
   };
   bases["NASA Blue Marble"].addTo(S.map);
   L.control.layers(bases, {}, { position: "topleft" }).addTo(S.map);
+  S.mapLegend = L.control({ position: "bottomleft" });
+  S.mapLegend.onAdd = () => { const d = L.DomUtil.create("div", "map-legend"); L.DomEvent.disableClickPropagation(d); return d; };
+  S.mapLegend.addTo(S.map);
   S.layers.cells = L.layerGroup().addTo(S.map);
   S.layers.fires = L.layerGroup().addTo(S.map);
   S.layers.sel = L.featureGroup().addTo(S.map);
@@ -685,14 +735,18 @@ function drawMap(fit) {
   S.layers.fires.clearLayers();
   const f = S.currentFire;
   if (f && !f.none) {
-    L.circleMarker([f.lat, f.lon], { pane: "fire", radius: 6 + Math.min(18, Math.sqrt(f.size) / 3), color: "#c2410c", weight: 2.5, fillColor: "#fcc419", fillOpacity: 0.9 })
+    L.circleMarker([f.lat, f.lon], { pane: "fire", radius: 6 + Math.min(18, Math.sqrt(f.size) / 3), color: "#c2410c", weight: 3, fillColor: "#fcc419", fillOpacity: 0.3 })
       .bindTooltip(`${f.current ? "Current" : "Largest"} fire: ${num(f.size)} harmonized hotspots, from ${isoDay(f.start)}`).addTo(S.layers.fires);
   }
   S.layers.sel.clearLayers();
   if (S.sel.poly) L.polygon(S.sel.poly.map(([x, y]) => [y, x]), { color: "#c2410c", weight: 2, fillOpacity: 0.04 }).addTo(S.layers.sel);
   if (fit) {
-    if (S.sel.poly) S.map.fitBounds(S.layers.sel.getBounds(), { padding: [20, 20] });
-    else S.map.fitBounds(dataBounds(D), { padding: [10, 10] });
+    if (S.sel.poly) {
+      // An area outside the region: show it together with the region, so the dashed line explains the zeros.
+      const b = S.layers.sel.getBounds();
+      if (S.selInfo && S.selInfo.outside) b.extend(L.latLngBounds([[Math.max(g.south, -70), g.west], [Math.min(g.north, 72), g.east]]));
+      S.map.fitBounds(b, { padding: [20, 20] });
+    } else S.map.fitBounds(dataBounds(D), { padding: [10, 10] });
   }
   drawCells();
 }
@@ -716,8 +770,23 @@ function drawCells() {
   blocks.forEach((v, b) => {
     const s = g.south + Math.floor(b / bcols) * size, w = g.west + (b % bcols) * size;
     L.rectangle([[s, w], [Math.min(s + size, g.north), Math.min(w + size, g.east)]], { renderer, stroke: false,
-      fillColor: ramp(CIVIDIS, 0.25 + 0.75 * Math.log1p(v) / Math.log1p(vmax)), fillOpacity: 0.78, interactive: false }).addTo(S.layers.cells);
+      fillColor: ramp(CIVIDIS, 0.25 + 0.75 * Math.log1p(v) / Math.log1p(vmax)),
+      fillOpacity: 0.35 + 0.5 * Math.log1p(v) / Math.log1p(vmax), interactive: false }).addTo(S.layers.cells);
   });
+  renderMapLegend(k);
+}
+
+// What the map shows, in three short lines: which month and series, the colour scale and square size, the symbols.
+function renderMapLegend(k) {
+  const el = S.mapLegend && S.mapLegend.getContainer();
+  if (!el) return;
+  const { y, m } = S.focus, f = S.currentFire;
+  const what = `${S.view === "harm" ? "Harmonized" : "Raw"} ${S.metric === "fires" ? "fires" : "hotspots"}, ${MONTHS[m - 1]} ${y}`;
+  const stops = [0.25, 0.5, 0.75, 1].map((x) => ramp(CIVIDIS, x)).join(",");
+  const fire = f && !f.none ? `<span class="ml-ring"></span>${f.current ? "Current fire" : "Largest fire of the month"}<span class="ml-sep"></span>` : "";
+  el.innerHTML = `<div class="ml-row ml-title">${what}</div>
+    <div class="ml-row">few<span class="ml-ramp" style="background:linear-gradient(90deg,${stops})"></span>many<span class="ml-sep"></span>1 square = about ${25 * k} km</div>
+    <div class="ml-row">${fire}<span class="ml-dash"></span>Region studied</div>`;
 }
 
 // Where the region's fires are, over the whole record: the 1st to 99th percentile of the cells with any hotspot.
@@ -740,10 +809,28 @@ function dataBounds(D) {
 /* ------------------------------------------------------------------ state changes */
 function setSelection(sel, fit = true) {
   S.sel = sel;
-  S.A = aggregate(S.D, maskFor(S.D, sel.poly));
+  S.selInfo = selectionFor(S.D, sel.poly);
+  S.A = aggregate(S.D, S.selInfo.mask);
   S.evKeep = eventsInSelection();
   $("selLabel").textContent = sel.label;
+  renderSelNote();
   renderAll(fit);
+}
+
+// Says why a selected area shows zeros (outside the region, open water) or covers more than drawn (smaller than a cell).
+// The same note sits under the map and above the calendar, with a button when the area belongs to another region.
+function renderSelNote() {
+  const info = S.selInfo || {};
+  const other = info.other ? S.meta.regions[info.other].label : "";
+  const html = info.note ? `${esc(info.note)}${other ? ` <button type="button" class="sel-switch">Open ${esc(other)} with this area</button>` : ""}` : "";
+  for (const id of ["selNote", "calWarn"]) {
+    const el = $(id);
+    if (!el) continue;
+    el.hidden = !html;
+    el.innerHTML = html;
+    const b = el.querySelector(".sel-switch");
+    if (b) b.onclick = () => setRegion(info.other, null, S.sel);
+  }
 }
 
 function selectArea(area) {
@@ -790,7 +877,7 @@ function bindCalendar() {
   });
 }
 
-async function setRegion(name, focus) {
+async function setRegion(name, focus, sel) {
   S.region = name;
   document.querySelectorAll("#regions button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.region === name)));
   $("calendar").innerHTML = `<p class="empty">Loading ${esc(S.meta.regions[name].label)}...</p>`;
@@ -814,7 +901,7 @@ async function setRegion(name, focus) {
   });
   $("fresh").textContent = `FIRMS data to ${D.lastDay.d} ${MONTHS_LONG[D.lastDay.m - 1]} ${D.lastDay.y} · updated ${S.meta.generated.slice(0, 10)}`;
   renderMethod();
-  setSelection({ poly: null, label: `${S.meta.regions[name].label} (whole region)` });
+  setSelection(sel || { poly: null, label: `${S.meta.regions[name].label} (whole region)` });
 }
 
 function bindControls() {
