@@ -640,6 +640,10 @@ function initMap() {
   S.map.createPane("reference");
   S.map.getPane("reference").style.zIndex = 450;
   S.map.getPane("reference").style.pointerEvents = "none";
+  // One canvas for all hotspot cells, reused at every redraw; the fire marker stays on top in its own pane.
+  S.map.createPane("fire");
+  S.map.getPane("fire").style.zIndex = 460;
+  S.cellRenderer = L.canvas({ padding: 0.3 });
   const bases = {
     "NASA Blue Marble": L.tileLayer(`${GIBS}BlueMarble_NextGeneration/default/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpeg`,
       { maxNativeZoom: 8, maxZoom: 12, opacity: 0.65, attribution: GIBS_CREDIT }),
@@ -666,6 +670,7 @@ function initMap() {
     edit: false,
   });
   S.map.addControl(draw);
+  S.map.on("zoomend", drawCells);
   S.map.on(L.Draw.Event.CREATED, (e) => {
     const ll = e.layer.getLatLngs()[0].map((p) => [p.lng, p.lat]);
     setSelection({ poly: ll, label: e.layerType === "rectangle" ? "Drawn rectangle" : "Drawn polygon" });
@@ -676,7 +681,6 @@ function drawMap(fit) {
   const D = S.D, g = D.g, A = S.A;
   S.layers.region.clearLayers();
   L.rectangle([[g.south, g.west], [g.north, g.east]], { color: "#1c2229", weight: 1, fill: false, dashArray: "4 4", interactive: false }).addTo(S.layers.region);
-  S.layers.cells.clearLayers();
   const t = tIndex(S.focus.y, S.focus.m);
   const vals = new Map();
   for (let i = 0; i < D.n; i++) {
@@ -687,26 +691,60 @@ function drawMap(fit) {
     else v = D.pred[i];
     if (v > 0) vals.set(D.cell[i], (vals.get(D.cell[i]) || 0) + v);
   }
-  let vmax = 1; vals.forEach((v) => { if (v > vmax) vmax = v; });
-  const renderer = L.canvas({ padding: 0.3 });
-  vals.forEach((v, c) => {
-    const i = Math.floor(c / g.ncols), j = c % g.ncols;
-    const s = g.south + i * g.deg, w = g.west + j * g.deg;
-    L.rectangle([[s, w], [s + g.deg, w + g.deg]], { renderer, stroke: false, fillColor: ramp(CIVIDIS, 0.25 + 0.75 * Math.log1p(v) / Math.log1p(vmax)),
-      fillOpacity: 0.78, interactive: false }).addTo(S.layers.cells);
-  });
+  S.cellVals = vals;
   S.layers.fires.clearLayers();
   const f = S.currentFire;
   if (f && !f.none) {
-    L.circleMarker([f.lat, f.lon], { radius: 6 + Math.min(18, Math.sqrt(f.size) / 3), color: "#c2410c", weight: 2.5, fillColor: "#fcc419", fillOpacity: 0.9 })
+    L.circleMarker([f.lat, f.lon], { pane: "fire", radius: 6 + Math.min(18, Math.sqrt(f.size) / 3), color: "#c2410c", weight: 2.5, fillColor: "#fcc419", fillOpacity: 0.9 })
       .bindTooltip(`${f.current ? "Current" : "Largest"} fire: ${num(f.size)} harmonized hotspots, from ${isoDay(f.start)}`).addTo(S.layers.fires);
   }
   S.layers.sel.clearLayers();
   if (S.sel.poly) L.polygon(S.sel.poly.map(([x, y]) => [y, x]), { color: "#c2410c", weight: 2, fillOpacity: 0.04 }).addTo(S.layers.sel);
   if (fit) {
     if (S.sel.poly) S.map.fitBounds(S.layers.sel.getBounds(), { padding: [20, 20] });
-    else S.map.fitBounds([[g.south, g.west], [g.north, g.east]], { padding: [10, 10] });
+    else S.map.fitBounds(dataBounds(D), { padding: [10, 10] });
   }
+  drawCells();
+}
+
+// Grid cells are 0.25 degree. Zoomed out on a large region (all of Canada), one cell is under 2 pixels wide,
+// so neighbouring cells are merged into blocks of k x k cells, at least MIN_CELL_PX wide on screen.
+const MIN_CELL_PX = 4;
+function drawCells() {
+  if (!S.map || !S.D || !S.cellVals) return;
+  const g = S.D.g;
+  const px = (g.deg / 360) * 256 * Math.pow(2, S.map.getZoom());
+  const k = Math.max(1, Math.ceil(MIN_CELL_PX / px));
+  const blocks = new Map(), bcols = Math.ceil(g.ncols / k);
+  S.cellVals.forEach((v, c) => {
+    const b = Math.floor(Math.floor(c / g.ncols) / k) * bcols + Math.floor((c % g.ncols) / k);
+    blocks.set(b, (blocks.get(b) || 0) + v);
+  });
+  let vmax = 1; blocks.forEach((v) => { if (v > vmax) vmax = v; });
+  S.layers.cells.clearLayers();
+  const renderer = S.cellRenderer, size = k * g.deg;
+  blocks.forEach((v, b) => {
+    const s = g.south + Math.floor(b / bcols) * size, w = g.west + (b % bcols) * size;
+    L.rectangle([[s, w], [Math.min(s + size, g.north), Math.min(w + size, g.east)]], { renderer, stroke: false,
+      fillColor: ramp(CIVIDIS, 0.25 + 0.75 * Math.log1p(v) / Math.log1p(vmax)), fillOpacity: 0.78, interactive: false }).addTo(S.layers.cells);
+  });
+}
+
+// Where the region's fires are, over the whole record: the 1st to 99th percentile of the cells with any hotspot.
+// Canada's box reaches 83 degrees north, which Web Mercator stretches far beyond the boreal fires.
+function dataBounds(D) {
+  if (D._bounds) return D._bounds;
+  const g = D.g, seen = new Uint8Array(g.ncols * g.nrows), rows = [], cols = [];
+  for (let i = 0; i < D.n; i++) {
+    const c = D.cell[i];
+    if (c >= 0 && c < seen.length && !seen[c]) { seen[c] = 1; rows.push(Math.floor(c / g.ncols)); cols.push(c % g.ncols); }
+  }
+  if (rows.length < 10) return (D._bounds = [[g.south, g.west], [g.north, g.east]]);
+  const q = (a, f) => a[Math.min(a.length - 1, Math.max(0, Math.round(f * (a.length - 1))))];
+  rows.sort((a, b) => a - b); cols.sort((a, b) => a - b);
+  D._bounds = [[g.south + q(rows, 0.01) * g.deg, g.west + q(cols, 0.01) * g.deg],
+               [g.south + (q(rows, 0.99) + 1) * g.deg, g.west + (q(cols, 0.99) + 1) * g.deg]];
+  return D._bounds;
 }
 
 /* ------------------------------------------------------------------ state changes */

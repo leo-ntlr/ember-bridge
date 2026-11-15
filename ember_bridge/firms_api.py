@@ -41,7 +41,7 @@ from pathlib import Path
 BASE = os.environ.get("FIRMS_BASE_URL", "https://firms.modaps.eosdis.nasa.gov").rstrip("/")
 MAX_DAY_RANGE = 5
 GRID_EPOCH = date(2000, 1, 1)   # windows sit on a fixed 5-day grid, so file names stay stable between runs
-USER_AGENT = "ember-bridge/0.7 (NASA Space Apps 2026; python-urllib)"
+USER_AGENT = "ember-bridge/0.8 (NASA Space Apps 2026; python-urllib)"
 # FIRMS allows 5000 transactions per 10 minutes and one area request costs several: about 20 for a
 # 5-day window (measured on 15 Nov 2026), so the quota, not the network, sets the pace of a full download.
 LIMIT_PAUSE_S = 600.0           # FIRMS said no: everyone waits 10 minutes (20, then 30 if it says no again)

@@ -111,13 +111,13 @@ case "${1:-start}" in
     [ -f web/data/meta.json ] || { echo "No web data yet: run bash ember.sh build first."; exit 1; }
     echo "Web app on http://localhost:8000 (Ctrl-C to stop)."
     (sleep 1; command -v open >/dev/null 2>&1 && open http://localhost:8000) &
-    exec "$PY" -m http.server 8000 --bind 127.0.0.1 --directory web ;;
+    exec "$PY" -m ember_bridge.serve --port 8000 --bind 127.0.0.1 --directory web ;;
   stop)
     for f in "$DL_PID" "$BUILD_PID"; do
       if alive "$f"; then kill "$(cat "$f")" && echo "Stopped $(basename "$f" .pid)."; rm -f "$f"; fi
     done ;;
   test)
-    for t in ingest harmonize analytics events firms_api build; do
+    for t in ingest harmonize analytics events firms_api build serve; do
       echo "== $t"
       if OUT=$("$PY" tests/test_$t.py 2>&1); then echo "$OUT" | tail -n 1; else echo "$OUT" | tail -n 25; echo "FAILED: $t"; exit 1; fi
     done
