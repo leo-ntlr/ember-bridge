@@ -10,6 +10,27 @@ gives every hotspot a weight with a 95 % range, so that 26 years of fires (Novem
 read as one consistent, VIIRS-equivalent series, in three fire regimes: Canada (boreal forest),
 the Brazilian Amazon (deforestation fires) and the southern African savanna.
 
+## Results on the real FIRMS archive
+
+Validation of the build of 15 November 2026 (FIRMS data to 2026-11-15, Suomi NPP to 2026-11-01), from
+`data/model/validation.json`. Error = median absolute error of monthly totals against what Suomi NPP
+saw, over months with at least 20 Suomi NPP hotspots. The 95 % range should contain the truth 95 % of the time.
+
+| Test | Months | Harmonized error | Raw counts error | 95 % range coverage |
+|---|---:|---:|---:|---:|
+| Aqua, years never seen (fit 2012-2022, test 2023 to 2026-11-01) | 141 | 22.0 % | 83.7 % | 70.9 % |
+| same, in 1 degree cells (about 100 km) | 28,498 cell-months | 40.4 % | 83.8 % | 72.3 % |
+| Aqua, region never seen: Canada | 179 | 16.4 % | 86.9 % | 79.9 % |
+| Aqua, region never seen: Brazilian Amazon | 179 | 18.8 % | 83.0 % | 98.3 % |
+| Aqua, region never seen: southern African savanna | 179 | 42.0 % | 84.2 % | 42.5 % |
+| Terra, in sample | 537 | 11.3 % | 90.3 % | 97.8 % |
+| NOAA-20, in sample | 312 | 3.1 % | 4.4 % | 93.9 % |
+
+Correlation with the truth on the years never seen: 0.98. Known limits: on those years the harmonized
+series is 21 % too high (48 % in the Amazon), and our leading suspect, not yet tested, is Aqua's drift
+to a later afternoon pass since its last orbit maneuvers in 2021; the 95 % ranges are too narrow out of
+sample; moving the model from forests to the savanna is the hardest transfer.
+
 ## Quick start (macOS or Linux, Python 3.9+)
 
 ```bash
