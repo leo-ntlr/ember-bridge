@@ -619,14 +619,13 @@ function renderMethod() {
 }
 
 /* ------------------------------------------------------------------ map */
-// Everything on the map comes from NASA GIBS (Global Imagery Browse Services, the imagery behind NASA Worldview):
-// Blue Marble by default, or the NOAA-20 VIIRS true-colour image of the day before the last data day, plus the
-// GIBS reference layers for place names, borders and roads (drawn by GIBS from OpenStreetMap data).
+// The map background comes from NASA GIBS (Global Imagery Browse Services, the imagery behind NASA Worldview):
+// Blue Marble by default, or the NOAA-20 VIIRS true-colour image of the day before the last data day.
 // GIBS needs no key. Its Web Mercator tiles are blank at zoom 0, hence minZoom 2.
 // Web Mercator tile matrix sets are named GoogleMapsCompatible_LevelN (N = deepest zoom of the layer).
+// No label overlay: CARTO labels now need a key, and the GIBS reference labels came back as opaque black tiles.
 const GIBS = "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/";
 const GIBS_CREDIT = 'Imagery <a href="https://earthdata.nasa.gov">NASA GIBS</a> (ESDIS)';
-const REF_CREDIT = 'Place names, borders and roads: NASA GIBS, data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
 function dayBefore(iso) {
   const t = Date.parse(`${iso}T00:00:00Z`);
@@ -636,10 +635,6 @@ function dayBefore(iso) {
 function initMap() {
   S.map = L.map("map", { preferCanvas: true, worldCopyJump: true, zoomSnap: 0.25, minZoom: 2 });
   const day = dayBefore(S.meta.last_day);
-  // Names, borders and roads sit in their own pane above the hotspot cells, and let the mouse through.
-  S.map.createPane("reference");
-  S.map.getPane("reference").style.zIndex = 450;
-  S.map.getPane("reference").style.pointerEvents = "none";
   // One canvas for all hotspot cells, reused at every redraw; the fire marker stays on top in its own pane.
   S.map.createPane("fire");
   S.map.getPane("fire").style.zIndex = 460;
@@ -651,13 +646,8 @@ function initMap() {
       `${GIBS}VIIRS_NOAA20_CorrectedReflectance_TrueColor/default/${day}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`,
       { maxNativeZoom: 9, maxZoom: 12, opacity: 0.85, attribution: GIBS_CREDIT }),
   };
-  const reference = (layer) => L.tileLayer(`${GIBS}${layer}/default/GoogleMapsCompatible_Level13/{z}/{y}/{x}.png`,
-    { maxZoom: 12, pane: "reference", attribution: REF_CREDIT });
-  const labels = reference("Reference_Labels_15m");
-  const features = reference("Reference_Features_15m");
   bases["NASA Blue Marble"].addTo(S.map);
-  labels.addTo(S.map);
-  L.control.layers(bases, { "Place names": labels, "Borders and roads": features }, { position: "topleft" }).addTo(S.map);
+  L.control.layers(bases, {}, { position: "topleft" }).addTo(S.map);
   S.layers.cells = L.layerGroup().addTo(S.map);
   S.layers.fires = L.layerGroup().addTo(S.map);
   S.layers.sel = L.featureGroup().addTo(S.map);
