@@ -128,8 +128,8 @@ Data and Information System (ESDIS).
 Third-party code shipped in `web/vendor/`: Leaflet 1.9.4 (BSD-2-Clause) and Leaflet.draw 1.0.4 (MIT).
 Map background: we acknowledge the use of imagery provided by services from NASA's Global Imagery Browse
 Services (GIBS), part of NASA's Earth Science Data and Information System (ESDIS): Blue Marble Next Generation
-(default) and VIIRS NOAA-20 Corrected Reflectance (true colour of the latest day). Street map and place names:
-OpenStreetMap contributors, CARTO.
+(default), VIIRS NOAA-20 Corrected Reflectance (true colour of the latest day), and the GIBS reference layers for
+place names, borders and roads (data © OpenStreetMap contributors). The map needs no key.
 
 ## License
 

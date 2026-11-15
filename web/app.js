@@ -603,13 +603,14 @@ function renderMethod() {
   const ts = v.Aqua_time_split_test || {};
   const loro = Object.entries(v).filter(([k]) => k.startsWith("Aqua_unseen_region_"));
   const label = (r) => (S.meta.regions[r] ? S.meta.regions[r].label : r);
+  const signed = (x) => `${x > 0 ? "+" : ""}${x}`;
   $("method").innerHTML = `<div class="card-head"><h2>How the bridge works</h2><span class="kicker">validated, not assumed</span></div>
     <p>FIRMS hotspots from five satellites cannot be added up: they differ in <b>resolution</b> (1 km MODIS vs 375 m VIIRS pixels), <b>sensitivity</b> (MODIS misses small fires)
     and <b>observation schedule</b> (Terra passes at 10:30, the others at 13:30, and Terra and Aqua drift). Ember Bridge learns from the years when Aqua and Suomi NPP flew together
     how many VIIRS hotspots each MODIS hotspot stands for, depending on fire power, pixel size, cluster size and the real local time of the pass, plus a correction for the fires MODIS never saw, set so that the weights add up to what Suomi NPP saw in those years.
     Every hotspot gets a weight with a 95% range; the calendar adds them up along one backbone: Terra, then Aqua, then Suomi NPP, then NOAA-20.</p>
     <ul>
-      ${ts.months ? `<li><b>Held-out years</b> (${esc(ts.test || "")}, never used for fitting): typical monthly error ${ts.median_abs_pct_error_harmonized}% harmonized vs ${ts.median_abs_pct_error_raw}% raw MODIS; correlation ${ts.correlation_harmonized}; the 95% range contains the truth in ${ts.interval_coverage_pct}% of ${ts.months} months.</li>` : ""}
+      ${ts.months ? `<li><b>Held-out years</b> (${esc(ts.test || "")}, never used for fitting): typical monthly error ${ts.median_abs_pct_error_harmonized}% harmonized vs ${ts.median_abs_pct_error_raw}% raw MODIS; correlation ${ts.correlation_harmonized}${ts.total_bias_pct != null ? `; total ${signed(ts.total_bias_pct)}% against the truth` : ""}; the 95% range contains the truth in ${ts.interval_coverage_pct}% of ${ts.months} region-months.</li>` : ""}
       ${ts.local_1deg_cells && ts.local_1deg_cells.cell_months ? `<li><b>Small areas</b> (1° cells, about 100 km, held-out years): typical monthly error ${ts.local_1deg_cells.median_abs_pct_error_harmonized}% harmonized vs ${ts.local_1deg_cells.median_abs_pct_error_raw}% raw; the 95% range contains the truth in ${ts.local_1deg_cells.interval_coverage_pct}% of ${num(ts.local_1deg_cells.cell_months)} cell-months.</li>` : ""}
       ${loro.map(([k, r]) => r.months ? `<li><b>Never-seen region</b>, ${esc(label(k.replace("Aqua_unseen_region_", "")))}: ${r.median_abs_pct_error_harmonized}% error harmonized vs ${r.median_abs_pct_error_raw}% raw (${r.months} months).</li>` : "").join("")}
       <li>Fires are counted too: VIIRS splits what MODIS sees as one fire, so MODIS-era fire counts are scaled by the ratio learned on the overlap years${v.fire_count_factor_global ? ` (×${v.fire_count_factor_global} overall)` : ""}.</li>
@@ -618,12 +619,14 @@ function renderMethod() {
 }
 
 /* ------------------------------------------------------------------ map */
-// Background imagery from NASA GIBS (Global Imagery Browse Services, the imagery behind NASA Worldview):
-// Blue Marble by default, or the NOAA-20 VIIRS true-colour image of the day before the last data day.
+// Everything on the map comes from NASA GIBS (Global Imagery Browse Services, the imagery behind NASA Worldview):
+// Blue Marble by default, or the NOAA-20 VIIRS true-colour image of the day before the last data day, plus the
+// GIBS reference layers for place names, borders and roads (drawn by GIBS from OpenStreetMap data).
 // GIBS needs no key. Its Web Mercator tiles are blank at zoom 0, hence minZoom 2.
+// Web Mercator tile matrix sets are named GoogleMapsCompatible_LevelN (N = deepest zoom of the layer).
 const GIBS = "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/";
 const GIBS_CREDIT = 'Imagery <a href="https://earthdata.nasa.gov">NASA GIBS</a> (ESDIS)';
-const OSM_CREDIT = "&copy; OpenStreetMap contributors &copy; CARTO";
+const REF_CREDIT = 'Place names, borders and roads: NASA GIBS, data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
 function dayBefore(iso) {
   const t = Date.parse(`${iso}T00:00:00Z`);
@@ -633,20 +636,24 @@ function dayBefore(iso) {
 function initMap() {
   S.map = L.map("map", { preferCanvas: true, worldCopyJump: true, zoomSnap: 0.25, minZoom: 2 });
   const day = dayBefore(S.meta.last_day);
+  // Names, borders and roads sit in their own pane above the hotspot cells, and let the mouse through.
+  S.map.createPane("reference");
+  S.map.getPane("reference").style.zIndex = 450;
+  S.map.getPane("reference").style.pointerEvents = "none";
   const bases = {
-    "NASA Blue Marble": L.tileLayer(`${GIBS}BlueMarble_NextGeneration/default/EPSG3857_500m/{z}/{y}/{x}.jpeg`,
+    "NASA Blue Marble": L.tileLayer(`${GIBS}BlueMarble_NextGeneration/default/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpeg`,
       { maxNativeZoom: 8, maxZoom: 12, opacity: 0.65, attribution: GIBS_CREDIT }),
     [`NASA satellite image, ${day === "default" ? "latest day" : day} (NOAA-20 VIIRS)`]: L.tileLayer(
       `${GIBS}VIIRS_NOAA20_CorrectedReflectance_TrueColor/default/${day}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`,
       { maxNativeZoom: 9, maxZoom: 12, opacity: 0.85, attribution: GIBS_CREDIT }),
-    "Street map (OpenStreetMap)": L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-      { maxZoom: 12, subdomains: "abcd", attribution: OSM_CREDIT }),
   };
-  const labels = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png",
-    { maxZoom: 12, subdomains: "abcd", zIndex: 5, attribution: OSM_CREDIT });
+  const reference = (layer) => L.tileLayer(`${GIBS}${layer}/default/GoogleMapsCompatible_Level13/{z}/{y}/{x}.png`,
+    { maxZoom: 12, pane: "reference", attribution: REF_CREDIT });
+  const labels = reference("Reference_Labels_15m");
+  const features = reference("Reference_Features_15m");
   bases["NASA Blue Marble"].addTo(S.map);
   labels.addTo(S.map);
-  L.control.layers(bases, { "Place names": labels }, { position: "topleft" }).addTo(S.map);
+  L.control.layers(bases, { "Place names": labels, "Borders and roads": features }, { position: "topleft" }).addTo(S.map);
   S.layers.cells = L.layerGroup().addTo(S.map);
   S.layers.fires = L.layerGroup().addTo(S.map);
   S.layers.sel = L.featureGroup().addTo(S.map);
