@@ -3,6 +3,9 @@
 **One fire history, whatever the satellite.** A harmonized MODIS + VIIRS burning-activity calendar
 for emergency managers (NASA Space Apps Challenge 2026, *Harmonization of MODIS and VIIRS Hot Spots*).
 
+**Live app: [ember-bridge.netlify.app](https://ember-bridge.netlify.app)**, built from the FIRMS archive
+of the three regions, with data to 15 November 2026.
+
 FIRMS hotspots from five satellites cannot simply be added up: VIIRS (375 m) sees about five times
 more hotspots than MODIS (1 km), MODIS misses small fires, Terra passes at 10:30 while the others pass
 at 13:30, and the counts jump every time a satellite is added (2002, 2012, 2018, 2023). Ember Bridge
