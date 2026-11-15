@@ -349,13 +349,14 @@ def _validate(store, parts, cals: dict, source, regions, start, end, truth, trut
 
 def _split_test(store, parts, aqua, name, keep, train, test, regions, truth, truth_local, gaps, n_boot, out,
                 csv_name=None) -> dict:
-    """Fit Aqua -> Suomi NPP on the years `keep` selects, with and without the pass-hour bins (ablation),
-    and measure both on the `test` dates."""
+    """Fit Aqua -> Suomi NPP on the years `keep` selects, as the model does (H.HOUR_BINS) and with the
+    pass-hour bins switched the other way (ablation test), and measure both on the `test` dates."""
     tables = _concat(aqua, keep)
     if not tables:
         return {}
+    other = f"{name}_no_hour_bin" if H.HOUR_BINS else f"{name}_with_hour_bins"
     cals = {name: H.fit_from_tables(*tables, "Aqua", n_boot=n_boot),
-            f"{name}_no_hour_bin": H.fit_from_tables(*tables, "Aqua", n_boot=n_boot, no_hour=True)}
+            other: H.fit_from_tables(*tables, "Aqua", n_boot=n_boot, no_hour=H.HOUR_BINS)}
     report = {}
     for k, (res, m) in _validate(store, parts, cals, "Aqua", regions, *test, truth, truth_local, gaps).items():
         report[k] = {"train": train, "test": f"{test[0]}..{test[1]}", **res}
@@ -657,8 +658,7 @@ def build(raw: Path, store: Path, model: Path, web: Path, skip_ingest=False, yea
         report["fire_count_factor_global"] = round(float(factors["global_factor"].iloc[0]), 3) if len(factors) else None
         report.update(outage_report(gaps))
         (model / "validation.json").write_text(json.dumps(report, indent=2, default=str))
-        for k in ("Aqua_time_split_test", "Aqua_time_split_test_no_hour_bin", "Aqua_early_years_test",
-                  "Aqua_early_years_test_no_hour_bin"):
+        for k in [k for k in report if k.startswith(("Aqua_time_split_test", "Aqua_early_years_test"))]:
             v = report.get(k, {})
             if v.get("months"):
                 log(f"validation {k}: {v['median_abs_pct_error_harmonized']}% typical monthly error, "

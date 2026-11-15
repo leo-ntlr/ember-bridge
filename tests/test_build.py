@@ -45,7 +45,7 @@ def test_build(tmp: Path):
                               "interval_coverage_pct")})
     assert ts["months"] > 20 and ts["median_abs_pct_error_harmonized"] < 20 < ts["median_abs_pct_error_raw"]
     assert all(f"Aqua_unseen_region_{r}" in report for r in ("canada", "amazon", "southern_africa"))
-    for name in ("Aqua_time_split_test_no_hour_bin", "Aqua_early_years_test", "Aqua_early_years_test_no_hour_bin"):
+    for name in ("Aqua_time_split_test_with_hour_bins", "Aqua_early_years_test", "Aqua_early_years_test_with_hour_bins"):
         v = report[name]
         print(name, {k: v[k] for k in ("months", "median_abs_pct_error_harmonized", "total_bias_pct")})
         assert v["months"] > 20 and v["median_abs_pct_error_harmonized"] < 20 < v["median_abs_pct_error_raw"]

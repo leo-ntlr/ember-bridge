@@ -99,8 +99,8 @@ hundreds of millions of detections fit on a laptop:
 3. **fit**: Aqua, Terra and NOAA-20 -> Suomi NPP calibrations.
 4. **validate**: trained on 2012-2022 and tested on 2023 to 2026-11-01 (Aqua's pass had drifted later
    in the day by then); trained on 2016 onwards and tested on 2012-2015 (Aqua still at 13:30, as in
-   2002-2012 when the calendar uses it); both with and without the pass-hour bins, for whole regions and
-   for 1 degree cells (about 100 km, the size of an area drawn in the app); trained on two regions and
+   2002-2012 when the calendar uses it); both also with a pass-time term (an ablation test), for whole
+   regions and for 1 degree cells (about 100 km, the size of an area drawn in the app); trained on two regions and
    tested on the third. Suomi NPP outage days are left out. Report: `data/model/validation.json`.
 5. **harmonize**: weights for every backbone hotspot (Terra 2000-11 to 2002-07, Aqua to 2012-01, Suomi
    NPP to 2026-11-01, NOAA-20 after), monthly cube on a 0.25 degree grid, fire events. On Suomi NPP
@@ -121,8 +121,11 @@ hundreds of millions of detections fit on a laptop:
   region, month and day/night, set so that in the overlap years the weights add up exactly to what
   Suomi NPP saw (ratio and correction never count the same fire twice).
 * **Observation schedule**: the reference series is the afternoon/night one (Aqua, Suomi NPP, NOAA-20);
-  the ratio depends on the real local solar time of each pass, so Terra and Aqua orbit drift is seen by
-  the model; Terra-only years are flagged as lower confidence.
+  Terra's morning passes get their own calibration, and Terra-only years are flagged as lower
+  confidence. A pass-time term (the real local solar time of each pass, from the acquisition time and
+  the longitude) was tested and left out: learned while Aqua passed at 13:30, it read 2023-2026, when
+  Aqua's pass had drifted later, 14 % too high, against 5 % too low without it, and it brought nothing
+  on 2012-2015, when Aqua still passed at 13:30 (`harmonize.HOUR_BINS`, results in `validation.json`).
 * `weight = ratio(situation) x (1 + missed correction)`. Sparse situations fall back to coarser ones.
 * **Uncertainty**: block bootstrap (blocks = cell x month) for the calibration, widened to the
   year-to-year spread of the correction (a prediction interval for a new year), plus compound-Poisson

@@ -46,6 +46,7 @@ FRP_EDGES = [0, 10, 25, 60, 150, np.inf]     # MW, mean source FRP in the cell-d
 AREA_EDGES = [0, 1.5, 3.0, np.inf]           # km2, mean source pixel area (swath position)
 COUNT_EDGES = [0, 1, 2, 5, np.inf]           # source detections in the cell-day
 HOUR_EDGES = [0, 13.0, 13.75, 14.5, 24]      # folded local solar hour of the source pass (drift)
+HOUR_BINS = False                            # pass-hour bins left out of the model: see fit_from_tables
 
 BIN_LEVELS = [
     ["daynight", "frp_bin", "area_bin", "count_bin", "hour_bin"],
@@ -237,12 +238,19 @@ def _year_spread(miss: pd.DataFrame, keys: list[str], min_pred: float = 20.0) ->
 
 def fit_from_tables(ratio: pd.DataFrame, miss: pd.DataFrame, source: str, reference: str = REFERENCE,
                     n_boot: int = 200, min_cell_days: int = 30, min_seen: int = 50, seed: int = 0,
-                    meta: dict | None = None, no_hour: bool = False) -> Calibration:
+                    meta: dict | None = None, no_hour: bool | None = None) -> Calibration:
     """Fit source -> reference weights from (concatenated) fit_tables outputs.
 
-    no_hour=True leaves the pass-hour bins out (an ablation test): every lookup falls back to the
-    level without them, for the bin ratios and for the missed-fire correction alike.
+    The pass-hour bins (real local solar time of the source pass) are left out unless HOUR_BINS: then
+    every lookup falls back to the level without them, for the bin ratios and the missed-fire
+    correction alike. They were tested on the real FIRMS archive (build of 15 November 2026): learned
+    while Aqua passed at 13:30, they read 2023-2026, when its pass had drifted later, 14 % too high
+    (typical monthly error 20.5 %), against 5 % too low without them (10.1 %); on 2012-2015, when Aqua
+    still passed at 13:30, both versions tie (7.8 % and 7.9 %). no_hour overrides the choice (the build
+    fits the other version too, as an ablation test).
     """
+    if no_hour is None:
+        no_hour = not HOUR_BINS
     if ratio.empty or ratio["n_src"].sum() == 0 or ratio["n_ref"].sum() == 0:
         raise ValueError(f"No overlapping {source}/{reference} data in the selected period")
     rng = np.random.default_rng(seed)
