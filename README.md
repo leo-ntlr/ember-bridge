@@ -130,3 +130,7 @@ Map background: we acknowledge the use of imagery provided by services from NASA
 Services (GIBS), part of NASA's Earth Science Data and Information System (ESDIS): Blue Marble Next Generation
 (default) and VIIRS NOAA-20 Corrected Reflectance (true colour of the latest day). Street map and place names:
 OpenStreetMap contributors, CARTO.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The FIRMS data and the NASA GIBS imagery keep their own terms (see Acknowledgments above).
