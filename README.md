@@ -16,22 +16,36 @@ Validation of the build of 15 November 2026 (FIRMS data to 2026-11-15, Suomi NPP
 `data/model/validation.json`. Error = median absolute error of monthly totals against what Suomi NPP
 saw, over months with at least 20 Suomi NPP hotspots. The 95 % range should contain the truth 95 % of the time.
 
-| Test | Months | Harmonized error | Raw counts error | 95 % range coverage |
-|---|---:|---:|---:|---:|
-| Aqua, years never seen (fit 2012-2022, test 2023 to 2026-11-01) | 141 | 22.0 % | 83.7 % | 70.9 % |
-| same, in 1 degree cells (about 100 km) | 28,498 cell-months | 40.4 % | 83.8 % | 72.3 % |
-| Aqua, region never seen: Canada | 179 | 16.4 % | 86.9 % | 79.9 % |
-| Aqua, region never seen: Brazilian Amazon | 179 | 18.8 % | 83.0 % | 98.3 % |
-| Aqua, region never seen: southern African savanna | 179 | 42.0 % | 84.2 % | 42.5 % |
-| Terra, in sample | 537 | 11.3 % | 90.3 % | 97.8 % |
-| NOAA-20, in sample | 312 | 3.1 % | 4.4 % | 93.9 % |
+| Test | Months | Harmonized error | Raw counts error | Total, harmonized vs truth | 95 % range coverage |
+|---|---:|---:|---:|---:|---:|
+| Aqua, later years never seen (fit 2012-2022, test 2023 to 2026-11-01) | 141 | 10.1 % | 84.2 % | -4.7 % | 87.2 % |
+| same, in 1 degree cells (about 100 km) | 28,446 cell-months | 31.7 % | 84.4 % | -4.8 % | 69.4 % |
+| same years, model with a pass-time term (left out of the final model) | 141 | 20.5 % | 84.2 % | +14.4 % | 75.2 % |
+| Aqua, early years never seen (fit 2016 to 2026, test 2012-01-20 to 2015) | 144 | 7.9 % | 83.3 % | +3.2 % | 99.3 % |
+| same, in 1 degree cells (about 100 km) | 28,724 cell-months | 28.2 % | 83.7 % | +3.3 % | 80.6 % |
+| same years, model with a pass-time term | 144 | 7.8 % | 83.3 % | +0.3 % | 99.3 % |
+| Aqua, region never seen: Canada | 179 | 16.4 % | 86.9 % | -12.2 % | 81.0 % |
+| Aqua, region never seen: Brazilian Amazon | 179 | 36.5 % | 83.1 % | +37.2 % | 86.0 % |
+| Aqua, region never seen: southern African savanna | 179 | 39.9 % | 84.4 % | -14.5 % | 36.3 % |
+| Terra, in sample | 537 | 11.3 % | 90.3 % | +0.0 % | 98.0 % |
+| NOAA-20, in sample | 312 | 2.2 % | 3.7 % | +0.0 % | 99.4 % |
 
-Correlation with the truth on the years never seen: 0.98. Known limits: on those years the harmonized
-series is 21 % too high (48 % in the Amazon); the 95 % ranges are too narrow out of sample; moving the
-model from forests to the savanna is the hardest transfer. Aqua's own hotspot counts hold steady against
-Suomi NPP (drift check below), so the bias comes from the model, not from Aqua: version 0.11 tests the
-pass-hour bins, learned while Aqua still passed at 13:30, adds a test on the early years, and fills
-Suomi NPP outages with NOAA-20 (numbers above to be updated with its build).
+Correlation with the truth on the years never seen: 0.99 (2023-2026) and 0.999 (2012-2015). On 70 days
+from 2019 to 2026, Suomi NPP saw less than half of what NOAA-20 saw over the three regions: those days are
+filled with harmonized NOAA-20 hotspots and left out of every fit and test (pipeline step 5).
+
+Known limits:
+
+* After Aqua's orbit drift, on 2023-2026, totals read 5 % low (11 % low in Canada) and the 95 % ranges
+  hold the truth in 87 % of months and 69 % of 1 degree cell-months, not 95 %.
+* A region never seen in training is the hardest case: learned from the other two regions alone, the
+  savanna gives 40 % error (the ranges hold the truth in 36 % of months) and the Amazon 37 % (totals
+  37 % high). The app's weights learn from all three regions.
+* The pass-time term, learned while Aqua passed at 13:30, read 2023-2026 14 % too high, while Aqua's own
+  counts hold steady against Suomi NPP (drift check below), so the final model leaves it out. It did
+  better on the unseen Amazon (18 % in the 0.11 build, against 37 %). The choice was made on the
+  2023-2026 test, which is therefore no longer fully blind for the final model; the 2012-2015 test,
+  where both versions tie (7.8 % and 7.9 %), still is.
 
 ### Orbit drift check
 
