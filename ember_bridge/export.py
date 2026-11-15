@@ -21,7 +21,7 @@ import pandas as pd
 from . import events as E
 from . import harmonize as H
 from .analytics import EXPORT_COLUMNS, circle, in_polygon
-from .build import HARM_COLS, SOURCES, _backbone_rows
+from .build import HARM_COLS, NO_DAYS, SOURCES, _backbone_rows, gaps_from_report
 from .ingest import partitions
 
 
@@ -32,13 +32,15 @@ def export(store: Path, model: Path, region: str, polygon, start: str, end: str,
     cals = {s: H.Calibration.load(cal_dir, s) for s in SOURCES if (cal_dir / f"{s}_to_SNPP_meta.json").exists()}
     report = json.loads((model / "validation.json").read_text())
     bb = H.backbone(report.get("snpp_last_day"))
+    gaps = gaps_from_report(report)            # Suomi NPP outage days: NOAA-20 stands in, as in the calendar
+    gap = gaps.get(region, NO_DAYS)
     frames = []
     for year in range(int(start[:4]), int(end[:4]) + 1):
         if (region, year) not in parts:
             continue
         used = []
         for platform, s, e in bb:
-            d = _backbone_rows(store, parts, region, year, platform, max(s, start), min(e, end), cals)
+            d = _backbone_rows(store, parts, region, year, platform, max(s, start), min(e, end), cals, gaps=gaps)
             if d is not None:
                 frames.append(d)
                 used.append((platform, max(s, start), min(e, end)))
@@ -49,6 +51,9 @@ def export(store: Path, model: Path, region: str, polygon, start: str, end: str,
                 for p, s, e in used:   # rows already exported as backbone
                     if p == platform:
                         d = d[~((d["date"] >= s) & (d["date"] <= e) & ((p == "Terra") | (d["orbit_group"] == "afternoon")))]
+                    if p == H.REFERENCE and platform == "NOAA20":     # NOAA-20 on Suomi NPP outage days
+                        d = d[~((d["date"] >= s) & (d["date"] <= e) & d["date"].isin(gap)
+                                & (d["orbit_group"] == "afternoon"))]
                 if len(d):
                     frames.append(d.assign(region=region, weight=0.0, weight_lo=0.0, weight_hi=0.0, weight_level=-1,
                                            in_reference=False, low_confidence_period=False))

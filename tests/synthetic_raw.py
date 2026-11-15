@@ -27,8 +27,10 @@ VIIRS_COLS = "latitude,longitude,bright_ti4,scan,track,acq_date,acq_time,satelli
 
 
 def write(raw: Path, regions=("canada", "amazon", "southern_africa"), first="2000-11-01", last="2026-11-13",
-          fires_per_day=3.0, nrt_from="2026-06-01", seed=7) -> int:
+          fires_per_day=3.0, nrt_from="2026-06-01", seed=7, snpp_outages=()) -> int:
+    """snpp_outages: (first day, last day) pairs when Suomi NPP sends nothing, like its real outages."""
     rng = np.random.default_rng(seed)
+    outages = [(date.fromisoformat(a), date.fromisoformat(b)) for a, b in snpp_outages]
     d0, d1 = date.fromisoformat(first), date.fromisoformat(last)
     n_rows = 0
     for region in regions:
@@ -64,6 +66,8 @@ def write(raw: Path, regions=("canada", "amazon", "southern_africa"), first="200
                                f"{size:.2f}", f"{size:.2f}", day.isoformat(), f"{int(utc):02d}{int(utc % 1 * 60):02d}",
                                CODE[platform], "MODIS" if modis else "VIIRS", conf, version, "300.0",
                                f"{frp / (1 if modis else 3):.2f}", "D"]
+                        if platform == "SNPP" and any(a <= day <= b for a, b in outages):
+                            continue
                         lines.setdefault((platform, day.year, nrt), []).append(",".join(row))
             if region == "canada" and rng.random() < 0.5:          # the static source, every other day
                 for platform in ("Aqua", "SNPP"):

@@ -645,18 +645,33 @@ function renderWatch() {
 function renderMethod() {
   const v = S.meta.validation || {};
   const ts = v.Aqua_time_split_test || {};
+  const ey = v.Aqua_early_years_test || {};
   const loro = Object.entries(v).filter(([k]) => k.startsWith("Aqua_unseen_region_"));
   const label = (r) => (S.meta.regions[r] ? S.meta.regions[r].label : r);
   const signed = (x) => `${x > 0 ? "+" : ""}${x}`;
+  const nDays = (r) => { const [a, b] = r.split(".."); return b ? Math.round((Date.parse(b) - Date.parse(a)) / 864e5) + 1 : 1; };
+  const dmy = (x) => { const [y, m, d] = x.split("-").map(Number); return [d, MONTHS[m - 1], y]; };
+  const fmtRange = (r) => {
+    const [a, b] = r.split("..").map(dmy);
+    if (!b) return a.join(" ");
+    return a[2] !== b[2] ? `${a.join(" ")} to ${b.join(" ")}` : a[1] !== b[1] ? `${a[0]} ${a[1]} to ${b.join(" ")}` : `${a[0]} to ${b.join(" ")}`;
+  };
+  const outRanges = v.snpp_outage_ranges || [];
+  const outLong = outRanges.filter((r) => r.includes(".."));
+  const outDays = outRanges.reduce((n, r) => n + nDays(r), 0);
+  const outRest = outDays - outLong.slice(0, 6).reduce((n, r) => n + nDays(r), 0);
+  const test = (t, name, note) => t.months ? `<li><b>${name}</b> (${esc(t.test || "")}, ${note}): typical monthly error ${t.median_abs_pct_error_harmonized}% harmonized vs ${t.median_abs_pct_error_raw}% raw MODIS; correlation ${t.correlation_harmonized}${t.total_bias_pct != null ? `; total ${signed(t.total_bias_pct)}% against the truth` : ""}; the 95% range contains the truth in ${t.interval_coverage_pct}% of ${t.months} region-months.</li>` : "";
   $("method").innerHTML = `<div class="card-head"><h2>How the bridge works</h2><span class="kicker">validated, not assumed</span></div>
     <p>FIRMS hotspots from five satellites cannot be added up: they differ in <b>resolution</b> (1 km MODIS vs 375 m VIIRS pixels), <b>sensitivity</b> (MODIS misses small fires)
     and <b>observation schedule</b> (Terra passes at 10:30, the others at 13:30, and Terra and Aqua drift). Ember Bridge learns from the years when Aqua and Suomi NPP flew together
     how many VIIRS hotspots each MODIS hotspot stands for, depending on fire power, pixel size, cluster size and the real local time of the pass, plus a correction for the fires MODIS never saw, set so that the weights add up to what Suomi NPP saw in those years.
     Every hotspot gets a weight with a 95% range; the calendar adds them up along one backbone: Terra, then Aqua, then Suomi NPP, then NOAA-20.</p>
     <ul>
-      ${ts.months ? `<li><b>Held-out years</b> (${esc(ts.test || "")}, never used for fitting): typical monthly error ${ts.median_abs_pct_error_harmonized}% harmonized vs ${ts.median_abs_pct_error_raw}% raw MODIS; correlation ${ts.correlation_harmonized}${ts.total_bias_pct != null ? `; total ${signed(ts.total_bias_pct)}% against the truth` : ""}; the 95% range contains the truth in ${ts.interval_coverage_pct}% of ${ts.months} region-months.</li>` : ""}
-      ${ts.local_1deg_cells && ts.local_1deg_cells.cell_months ? `<li><b>Small areas</b> (1° cells, about 100 km, held-out years): typical monthly error ${ts.local_1deg_cells.median_abs_pct_error_harmonized}% harmonized vs ${ts.local_1deg_cells.median_abs_pct_error_raw}% raw; the 95% range contains the truth in ${ts.local_1deg_cells.interval_coverage_pct}% of ${num(ts.local_1deg_cells.cell_months)} cell-months.</li>` : ""}
+      ${test(ts, "Held-out later years", "never used for fitting; by then Aqua's pass had drifted later in the day")}
+      ${ts.local_1deg_cells && ts.local_1deg_cells.cell_months ? `<li><b>Small areas</b> (1° cells, about 100 km, held-out later years): typical monthly error ${ts.local_1deg_cells.median_abs_pct_error_harmonized}% harmonized vs ${ts.local_1deg_cells.median_abs_pct_error_raw}% raw; the 95% range contains the truth in ${ts.local_1deg_cells.interval_coverage_pct}% of ${num(ts.local_1deg_cells.cell_months)} cell-months.</li>` : ""}
+      ${test(ey, "Held-out early years", "fitted on the later years; Aqua still passed at 13:30, as in 2002-2012 when the calendar uses it")}
       ${loro.map(([k, r]) => r.months ? `<li><b>Never-seen region</b>, ${esc(label(k.replace("Aqua_unseen_region_", "")))}: ${r.median_abs_pct_error_harmonized}% error harmonized vs ${r.median_abs_pct_error_raw}% raw (${r.months} months).</li>` : "").join("")}
+      ${outDays ? `<li><b>Suomi NPP outages</b>: on ${outDays} days, Suomi NPP saw less than half of what NOAA-20 (same orbit, 50 minutes ahead) saw over the three regions${outLong.length ? ` (${outLong.slice(0, 6).map(fmtRange).join(", ")}${outRest ? `, and ${outRest} other day${outRest > 1 ? "s" : ""}` : ""})` : ""}; NASA reported outages in July-August 2022, July-August 2024 and July 2026. On those days the calendar takes NOAA-20 hotspots, harmonized to Suomi NPP, and fitting and tests leave them out.</li>` : ""}
       <li>Fires are counted too: VIIRS splits what MODIS sees as one fire, so MODIS-era fire counts are scaled by the ratio learned on the overlap years${v.fire_count_factor_global ? ` (×${v.fire_count_factor_global} overall)` : ""}.</li>
       <li>Near-real-time files have no "static source" flag: gas flares, mines and volcanoes learned from the science-quality archive are masked, so the month in progress is compared fairly.</li>
     </ul>`;

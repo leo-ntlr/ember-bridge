@@ -36,7 +36,8 @@ from .ingest import ingest, partitions, read_partition
 PLATFORMS = ["Terra", "Aqua", "SNPP", "NOAA20", "NOAA21"]
 SOURCES = {"Aqua": "2012-01-20", "Terra": "2012-01-20", "NOAA20": "2018-04-01"}   # overlap with Suomi NPP
 FACTOR_YEARS = (2013, 2016, 2019, 2022)   # fire-count factor: a few full overlap years are plenty
-TRAIN_END_YEAR = 2022
+TRAIN_END_YEAR = 2022                     # time-split test: fit up to this year, test on the later years
+EARLY_TEST_END_YEAR = 2015                # early-years test: fit on the later years, test 2012 to this year
 GRID_DEG = 0.25                           # web cube cells (~25 km)
 LOCAL_DEG = 1.0                           # local validation cells (~100 km, the size of a drawn area)
 NOTABLE_EVENTS = 50_000                   # per region, largest fires kept with full details for the web
@@ -50,6 +51,9 @@ SRC_COLS = ["lat", "lon", "date", "daynight", "frp", "pixel_area_km2", "solar_ho
 HARM_COLS = ["time_utc", "date", "month", "lat", "lon", "sensor", "platform", "orbit_group", "solar_hour",
              "daynight", "confidence", "frp", "pixel_area_km2"]
 CELL_KEYS = ["region", "cell", "date", "daynight"]
+GAP_SHARE = 0.5                           # Suomi NPP saw less than half of what NOAA-20 saw that day...
+GAP_MIN = 100                             # ...while NOAA-20 saw at least this many detections: an outage
+NO_DAYS = pd.DatetimeIndex([])
 
 
 def log(msg: str) -> None:
@@ -122,24 +126,90 @@ def _fire_starts(d: pd.DataFrame, region: str, platform: str) -> list[dict]:
             for m, n in starts.dt.month.value_counts().items()]
 
 
-def build_tables(store: Path, parts: dict, snpp_last: str, out: Path) -> dict:
+def snpp_gap_days(parts: dict, snpp_last: str) -> dict[str, pd.DatetimeIndex]:
+    """Suomi NPP outage days per region, found against NOAA-20 (same 13:30 orbit, 50 minutes ahead).
+
+    A day is an outage day when, over all regions together, Suomi NPP saw less than half of what NOAA-20
+    saw: the satellite itself was down (NASA reported outages from 26 July to 10 August 2022, from 24 July
+    to 2 August 2024 and from 10 to 17 July 2026). Pooling the regions keeps a fire seen at the edge of
+    one swath and the centre of the other from passing for an outage. A day when Suomi NPP has no hotspot
+    at all in a region where NOAA-20 saw many is one too (data missing for that region).
+    On these days the calendar takes NOAA-20 hotspots, harmonized to Suomi NPP, and the fit and the
+    validation leave the days out: their Suomi NPP "truth" is incomplete.
+    """
+    rows = []
+    for (region, year), files in parts.items():
+        if "SNPP" not in files or "NOAA20" not in files or str(year) > snpp_last[:4]:
+            continue
+        n = {}
+        for p in ("SNPP", "NOAA20"):
+            d = pd.read_parquet(files[p], columns=["date", "orbit_group"])
+            n[p] = d.loc[d["orbit_group"].astype(str) == "afternoon", "date"].value_counts()
+        rows.append(pd.concat(n, axis=1).fillna(0).rename_axis("date").reset_index().assign(region=region))
+    if not rows:
+        return {}
+    c = pd.concat(rows, ignore_index=True)
+    c = c[c["date"] <= pd.Timestamp(snpp_last)]
+    pooled = c.groupby("date")[["SNPP", "NOAA20"]].sum()
+    down = pooled.index[(pooled["NOAA20"] >= GAP_MIN) & (pooled["SNPP"] < GAP_SHARE * pooled["NOAA20"])]
+    out = {}
+    for region, g in c.groupby("region"):
+        hit = g["date"].isin(down) | ((g["NOAA20"] >= GAP_MIN) & (g["SNPP"] == 0))
+        if hit.any():
+            out[region] = pd.DatetimeIndex(g.loc[hit, "date"]).unique().sort_values()
+    return out
+
+
+def day_ranges(days: pd.DatetimeIndex) -> list[str]:
+    """Consecutive days written as ranges, e.g. ['2024-07-24..2024-08-01']."""
+    out, run = [], []
+    for d in pd.DatetimeIndex(days).sort_values():
+        if run and (d - run[-1]).days > 1:
+            out.append(run)
+            run = []
+        run.append(d)
+    if run:
+        out.append(run)
+    return [f"{r[0]:%Y-%m-%d}" if len(r) == 1 else f"{r[0]:%Y-%m-%d}..{r[-1]:%Y-%m-%d}" for r in out]
+
+
+def outage_report(gaps: dict) -> dict:
+    """Outage days for validation.json and the web app: per region, and all regions together."""
+    every = NO_DAYS.append(list(gaps.values())).unique() if gaps else NO_DAYS
+    return {"snpp_outage_days": {r: day_ranges(d) for r, d in gaps.items()},
+            "snpp_outage_ranges": day_ranges(every)}
+
+
+def gaps_from_report(report: dict) -> dict[str, pd.DatetimeIndex]:
+    """The outage days written in validation.json by day_ranges, back as dates."""
+    out = {}
+    for region, ranges in (report.get("snpp_outage_days") or {}).items():
+        days = [pd.date_range(*(r.split("..") if ".." in r else (r, r))) for r in ranges]
+        out[region] = days[0].append(days[1:]) if days else NO_DAYS
+    return out
+
+
+def build_tables(store: Path, parts: dict, snpp_last: str, out: Path, gaps: dict | None = None) -> dict:
     """Per region-year: fit tables for each source, monthly Suomi NPP truth, fire-start counts.
 
     Read a month at a time (the tables are additive and a bootstrap block never spans two months),
-    so the memory stays small even for the densest savanna years.
+    so the memory stays small even for the densest savanna years. Suomi NPP outage days are left out.
     """
     tables = {s: [] for s in SOURCES}
     truth, truth_local, fire_counts = [], [], []
+    gaps = gaps or {}
     for (region, year), files in parts.items():
         if "SNPP" not in files or year < 2012 or str(year) > snpp_last[:4]:
             continue
         t0 = time.time()
         n_ref = 0
         pieces = {s: ([], []) for s in SOURCES}
+        gap = gaps.get(region, NO_DAYS)
         for month in range(1, 13):
             flt = [("month", "==", month)]
             ref = read_partition(store, region, year, ["SNPP"], REF_COLS, parts, filters=flt)
-            ref = ref[(ref["date"] >= "2012-01-20") & (ref["date"] <= snpp_last) & (ref["orbit_group"] == "afternoon")]
+            ref = ref[(ref["date"] >= "2012-01-20") & (ref["date"] <= snpp_last) & (ref["orbit_group"] == "afternoon")
+                      & ~ref["date"].isin(gap)]
             if ref.empty:            # no Suomi NPP data this month: nothing to learn from
                 continue
             n_ref += len(ref)
@@ -152,6 +222,7 @@ def build_tables(store: Path, parts: dict, snpp_last: str, out: Path) -> dict:
                 if source not in files:
                     continue
                 src = read_partition(store, region, year, [source], SRC_COLS, parts, filters=flt)
+                src = src[~src["date"].isin(gap)]
                 t = _join(_cell_day_src(src), ref_cd, max(start, f"{year}-01-01"), snpp_last)
                 if len(t) and t["n_src"].sum() > 0 and t["n_ref"].sum() > 0:
                     ratio, miss = H.fit_tables(t)
@@ -163,8 +234,10 @@ def build_tables(store: Path, parts: dict, snpp_last: str, out: Path) -> dict:
         if year in FACTOR_YEARS and "Aqua" in files:
             cols = ["lat", "lon", "date", "orbit_group"]
             ref = read_partition(store, region, year, ["SNPP"], cols, parts)
-            ref = ref[(ref["date"] >= "2012-01-20") & (ref["date"] <= snpp_last) & (ref["orbit_group"] == "afternoon")]
+            ref = ref[(ref["date"] >= "2012-01-20") & (ref["date"] <= snpp_last) & (ref["orbit_group"] == "afternoon")
+                      & ~ref["date"].isin(gap)]
             aqua = read_partition(store, region, year, ["Aqua"], cols, parts)
+            aqua = aqua[~aqua["date"].isin(gap)]
             fire_counts += _fire_starts(aqua[aqua["orbit_group"] == "afternoon"], region, "Aqua")
             fire_counts += _fire_starts(ref, region, "SNPP")
             del ref, aqua
@@ -229,57 +302,90 @@ def _predict_monthly(cal: H.Calibration, src: pd.DataFrame) -> tuple[pd.DataFram
     return out[0], out[1]
 
 
-def _validate(store, parts, cal, source, regions, start, end, truth, truth_local=None) -> tuple[dict, pd.DataFrame]:
-    """Monthly error on [start, end]: whole regions, and 1-degree cells (~100 km, like a drawn area)."""
-    preds, preds_local = [], []
+def _validate(store, parts, cals: dict, source, regions, start, end, truth, truth_local=None,
+              gaps: dict | None = None) -> dict:
+    """Monthly error on [start, end]: whole regions, and 1-degree cells (~100 km, like a drawn area).
+
+    `cals` maps a test name to a calibration: the source data is read once for all of them.
+    Suomi NPP outage days are left out (the truth was built without them too).
+    Returns {name: (metrics, monthly table)}.
+    """
+    gaps = gaps or {}
+    preds = {name: ([], []) for name in cals}
     for (region, year), files in parts.items():
         if region not in regions or source not in files or not (start[:4] <= str(year) <= end[:4]):
             continue
+        gap = gaps.get(region, NO_DAYS)
         for month in range(1, 13):          # a month at a time: same result, a twelfth of the memory
             src = read_partition(store, region, year, [source], SRC_COLS, parts, filters=[("month", "==", month)])
-            src = src[(src["date"] >= start) & (src["date"] <= end)]
+            src = src[(src["date"] >= start) & (src["date"] <= end) & ~src["date"].isin(gap)]
             if src.empty:
                 continue
-            p, pl = _predict_monthly(cal, src)
-            preds.append(p)
-            preds_local.append(pl)
-    if not preds:
-        return {"months": 0}, pd.DataFrame()
+            for name, cal in cals.items():
+                p, pl = _predict_monthly(cal, src)
+                preds[name][0].append(p)
+                preds[name][1].append(pl)
     lo_ym, hi_ym = _ym(pd.Series([pd.Timestamp(start)]))[0], _ym(pd.Series([pd.Timestamp(end)]))[0]
 
     def joined(pred, tr, keys):
         m = pred.merge(tr, on=keys, how="outer").fillna(0)
         return m[(m["ym"] >= lo_ym) & (m["ym"] <= hi_ym) & m["region"].isin(regions)]
 
-    m = joined(pd.concat(preds, ignore_index=True), truth, ["region", "ym"])
-    res = H.metrics(m)
-    if truth_local is not None and len(truth_local):
-        ml = joined(pd.concat(preds_local, ignore_index=True), truth_local, ["region", "ym", "lc"])
-        local = H.metrics(ml)
-        res["local_1deg_cells"] = {"cell_months": local.pop("months", 0), **local}
-    return res, m
+    out = {}
+    for name, (p, pl) in preds.items():
+        if not p:
+            out[name] = ({"months": 0}, pd.DataFrame())
+            continue
+        m = joined(pd.concat(p, ignore_index=True), truth, ["region", "ym"])
+        res = H.metrics(m)
+        if truth_local is not None and len(truth_local):
+            ml = joined(pd.concat(pl, ignore_index=True), truth_local, ["region", "ym", "lc"])
+            local = H.metrics(ml)
+            res["local_1deg_cells"] = {"cell_months": local.pop("months", 0), **local}
+        out[name] = (res, m)
+    return out
 
 
-def fit_and_validate(store, parts, t: dict, snpp_last: str, out: Path, n_boot: int) -> tuple[dict, dict]:
+def _split_test(store, parts, aqua, name, keep, train, test, regions, truth, truth_local, gaps, n_boot, out,
+                csv_name=None) -> dict:
+    """Fit Aqua -> Suomi NPP on the years `keep` selects, with and without the pass-hour bins (ablation),
+    and measure both on the `test` dates."""
+    tables = _concat(aqua, keep)
+    if not tables:
+        return {}
+    cals = {name: H.fit_from_tables(*tables, "Aqua", n_boot=n_boot),
+            f"{name}_no_hour_bin": H.fit_from_tables(*tables, "Aqua", n_boot=n_boot, no_hour=True)}
+    report = {}
+    for k, (res, m) in _validate(store, parts, cals, "Aqua", regions, *test, truth, truth_local, gaps).items():
+        report[k] = {"train": train, "test": f"{test[0]}..{test[1]}", **res}
+        for r in regions:
+            if len(m):
+                report[k][f"region_{r}"] = H.metrics(m[m["region"] == r])
+        if csv_name and k == name and len(m):
+            m.to_csv(out / csv_name, index=False)
+    return report
+
+
+def fit_and_validate(store, parts, t: dict, snpp_last: str, out: Path, n_boot: int,
+                     gaps: dict | None = None) -> tuple[dict, dict]:
     tables, truth, truth_local = t["tables"], t["truth"], t.get("truth_local")
     report: dict = {"snpp_last_day": snpp_last}
     aqua = tables["Aqua"]
     if not aqua:
         raise SystemExit("No Aqua / Suomi NPP overlap in the store: download MODIS and VIIRS_SNPP first.")
     regions = sorted({r for r, _, _, _ in aqua})
-    test_start = f"{TRAIN_END_YEAR + 1}-01-01"
-    log("fit: Aqua -> Suomi NPP on 2012-2022 (time-split test)")
-    train = _concat(aqua, lambda r, y: y <= TRAIN_END_YEAR)
-    if train:
-        cal = H.fit_from_tables(*train, "Aqua", n_boot=n_boot)
-        res, m = _validate(store, parts, cal, "Aqua", regions, test_start, snpp_last, truth, truth_local)
-        report["Aqua_time_split_test"] = {"train": f"2012-01-20..{TRAIN_END_YEAR}-12-31",
-                                          "test": f"{test_start}..{snpp_last}", **res}
-        for r in regions:
-            if len(m):
-                report["Aqua_time_split_test"][f"region_{r}"] = H.metrics(m[m["region"] == r])
-        if len(m):
-            m.to_csv(out / "validation_time_split_monthly.csv", index=False)
+    # Time split: fit up to 2022, test on 2023 onwards, when Aqua's pass had drifted later in the day.
+    log(f"fit: Aqua -> Suomi NPP on 2012-{TRAIN_END_YEAR} (time-split test), with and without pass-hour bins")
+    report.update(_split_test(store, parts, aqua, "Aqua_time_split_test", lambda r, y: y <= TRAIN_END_YEAR,
+                              f"2012-01-20..{TRAIN_END_YEAR}-12-31", (f"{TRAIN_END_YEAR + 1}-01-01", snpp_last),
+                              regions, truth, truth_local, gaps, n_boot, out, "validation_time_split_monthly.csv"))
+    # Early years: fit on 2016 onwards (drifted years included), test on 2012-2015, when Aqua still flew
+    # at 13:30 as it did in 2002-2012, the years the calendar takes from Aqua.
+    log(f"fit: Aqua -> Suomi NPP on {EARLY_TEST_END_YEAR + 1}-{snpp_last[:4]} (early-years test)")
+    report.update(_split_test(store, parts, aqua, "Aqua_early_years_test", lambda r, y: y > EARLY_TEST_END_YEAR,
+                              f"{EARLY_TEST_END_YEAR + 1}-01-01..{snpp_last}",
+                              ("2012-01-20", f"{EARLY_TEST_END_YEAR}-12-31"),
+                              regions, truth, truth_local, gaps, n_boot, out, "validation_early_years_monthly.csv"))
     if len(regions) > 1:
         for r in regions:
             log(f"fit: leave-one-region-out, {r} never seen")
@@ -287,8 +393,9 @@ def fit_and_validate(store, parts, t: dict, snpp_last: str, out: Path, n_boot: i
             if not rest:
                 continue
             cal = H.fit_from_tables(*rest, "Aqua", n_boot=max(n_boot // 4, 20))
-            res, m = _validate(store, parts, cal, "Aqua", [r], "2012-01-20", snpp_last, truth, truth_local)
-            report[f"Aqua_unseen_region_{r}"] = res
+            name = f"Aqua_unseen_region_{r}"
+            report[name] = _validate(store, parts, {name: cal}, "Aqua", [r], "2012-01-20", snpp_last, truth,
+                                     truth_local, gaps)[name][0]
     cals = {}
     for source in SOURCES:
         if tables[source]:
@@ -297,9 +404,9 @@ def fit_and_validate(store, parts, t: dict, snpp_last: str, out: Path, n_boot: i
                                              meta={"start": SOURCES[source], "end": snpp_last})
     for source in ("NOAA20", "Terra"):
         if source in cals:
-            res, _ = _validate(store, parts, cals[source], source, regions, SOURCES[source], snpp_last, truth,
-                             truth_local)
-            report[f"{source}_in_sample_check"] = res
+            name = f"{source}_in_sample_check"
+            report[name] = _validate(store, parts, {name: cals[source]}, source, regions, SOURCES[source],
+                                     snpp_last, truth, truth_local, gaps)[name][0]
     model = out / "calibration"
     shutil.rmtree(model, ignore_errors=True)
     for c in cals.values():
@@ -311,29 +418,48 @@ def fit_and_validate(store, parts, t: dict, snpp_last: str, out: Path, n_boot: i
 
 # --------------------------------------------------------------------------- 5. harmonize
 
-def _backbone_rows(store, parts, region, year, platform, start, end, cals, columns=HARM_COLS, month=None):
+def _backbone_rows(store, parts, region, year, platform, start, end, cals, columns=HARM_COLS, month=None,
+                   gaps: dict | None = None):
+    """Backbone hotspots of one platform in one region-year, with their weights.
+
+    On Suomi NPP outage days (`gaps`), NOAA-20 hotspots stand in for the missing Suomi NPP ones,
+    weighted with the NOAA-20 -> Suomi NPP calibration (same orbit, 50 minutes ahead).
+    """
     s, e = max(start, f"{year}-01-01"), min(end, f"{year}-12-31")
-    if s > e or platform not in parts.get((region, year), {}):
+    files = parts.get((region, year), {})
+    if s > e or platform not in files:
         return None
-    path = parts[(region, year)][platform]
     filters = [("month", "==", month)] if month else None
-    d = pd.read_parquet(path, columns=columns, filters=filters)
-    d.insert(0, "region", region)
-    d = d[(d["date"] >= s) & (d["date"] <= e)]
-    if platform != "Terra":
-        d = d[d["orbit_group"] == "afternoon"]
-    if d.empty:
-        return None
+
+    def read(p):
+        d = pd.read_parquet(files[p], columns=columns, filters=filters)
+        d.insert(0, "region", region)
+        d = d[(d["date"] >= s) & (d["date"] <= e)]
+        return d if p == "Terra" else d[d["orbit_group"] == "afternoon"]
+
+    d = read(platform)
+    fill = None
     if platform == H.REFERENCE:
+        gap = (gaps or {}).get(region, NO_DAYS)
+        gap = gap[(gap >= s) & (gap <= e)]
+        if len(gap) and "NOAA20" in files and "NOAA20" in cals:
+            d = d[~d["date"].isin(gap)]
+            n20 = read("NOAA20")
+            n20 = n20[n20["date"].isin(gap)]
+            if len(n20):
+                fill = H.apply_weights(n20, cals["NOAA20"]).assign(in_reference=True, low_confidence_period=False)
         d = d.assign(weight=1.0, weight_lo=1.0, weight_hi=1.0, weight_level=0)
-    else:
+    elif len(d):
         if platform not in cals:
             raise SystemExit(f"No calibration for {platform}: is the {platform} overlap with Suomi NPP downloaded?")
         d = H.apply_weights(d, cals[platform])
-    return d.assign(in_reference=True, low_confidence_period=(platform == "Terra"))
+    d = d.assign(in_reference=True, low_confidence_period=(platform == "Terra"))
+    if fill is not None:
+        d = pd.concat([x for x in (d, fill) if len(x)], ignore_index=True)
+    return d if len(d) else None
 
 
-def harmonize_partition(store, parts, region, year, cals, bb, factors, grid, recent_from):
+def harmonize_partition(store, parts, region, year, cals, bb, factors, grid, recent_from, gaps=None):
     """Weights, monthly cube, events and recent hotspots of one region-year."""
     files = parts[(region, year)]
     cube = []
@@ -341,7 +467,7 @@ def harmonize_partition(store, parts, region, year, cals, bb, factors, grid, rec
         d = pd.read_parquet(path, columns=["lat", "lon", "month"])
         c = pd.DataFrame({"cell": grid_cell(d["lat"], d["lon"], grid), "month": d["month"].astype(int)})
         cube.append(c[c["cell"] >= 0].value_counts().rename(f"raw_{platform}"))
-    hs = [_backbone_rows(store, parts, region, year, p, s, e, cals) for p, s, e in bb]
+    hs = [_backbone_rows(store, parts, region, year, p, s, e, cals, gaps=gaps) for p, s, e in bb]
     hs = [h for h in hs if h is not None]
     ev = pd.DataFrame()
     recent = pd.DataFrame()
@@ -376,13 +502,13 @@ def harmonize_partition(store, parts, region, year, cals, bb, factors, grid, rec
     return out, ev, recent
 
 
-def month_to_date(store, parts, region, cals, bb, month: int, day: int, grid) -> pd.DataFrame:
+def month_to_date(store, parts, region, cals, bb, month: int, day: int, grid, gaps=None) -> pd.DataFrame:
     """Harmonized hotspots from the 1st to `day` of `month`, every year, per grid cell."""
     rows = []
     for (r, year) in parts:
         if r != region:
             continue
-        hs = [_backbone_rows(store, parts, region, year, p, s, e, cals, month=month) for p, s, e in bb]
+        hs = [_backbone_rows(store, parts, region, year, p, s, e, cals, month=month, gaps=gaps) for p, s, e in bb]
         hs = [h for h in hs if h is not None]
         if not hs:
             continue
@@ -507,22 +633,36 @@ def build(raw: Path, store: Path, model: Path, web: Path, skip_ingest=False, yea
     if not snpp_last:
         raise SystemExit("No Suomi NPP data in the store: it is the reference of the harmonized series.")
     bb = H.backbone(snpp_last)
+    gaps = snpp_gap_days(parts, snpp_last)
+    for r in regions:
+        days = gaps.get(r, NO_DAYS)
+        log(f"Suomi NPP outage days in {r}: {len(days)}" + (f", NOAA-20 fills them: {', '.join(day_ranges(days))}"
+                                                             if len(days) else ""))
     cal_dir = model / "calibration"
     if years and (cal_dir / "Aqua_to_SNPP_meta.json").exists():
         log("2-4/6 reusing the fitted model (incremental run)")
         cals = {s: H.Calibration.load(cal_dir, s) for s in SOURCES if (cal_dir / f"{s}_to_SNPP_meta.json").exists()}
         report = json.loads((model / "validation.json").read_text())
+        report.update(outage_report(gaps))
+        (model / "validation.json").write_text(json.dumps(report, indent=2, default=str))
         factors = pd.read_parquet(model / "count_factors.parquet")
     else:
         log("2/6 fit tables, one region-year at a time")
-        t = build_tables(store, parts, snpp_last, model)
+        t = build_tables(store, parts, snpp_last, model, gaps)
         log("3-4/6 fit and validate")
-        report, cals = fit_and_validate(store, parts, t, snpp_last, model, n_boot)
+        report, cals = fit_and_validate(store, parts, t, snpp_last, model, n_boot, gaps)
         factors = count_factors(t["fire_counts"])
         factors.to_parquet(model / "count_factors.parquet")
         report["fire_count_factor_global"] = round(float(factors["global_factor"].iloc[0]), 3) if len(factors) else None
+        report.update(outage_report(gaps))
         (model / "validation.json").write_text(json.dumps(report, indent=2, default=str))
-        log("validation: " + json.dumps({k: v for k, v in report.items() if k.startswith("Aqua_time")}, default=str))
+        for k in ("Aqua_time_split_test", "Aqua_time_split_test_no_hour_bin", "Aqua_early_years_test",
+                  "Aqua_early_years_test_no_hour_bin"):
+            v = report.get(k, {})
+            if v.get("months"):
+                log(f"validation {k}: {v['median_abs_pct_error_harmonized']}% typical monthly error, "
+                    f"total {v['total_bias_pct']:+}%, 95% range holds the truth in {v['interval_coverage_pct']}% "
+                    f"of {v['months']} months")
     last_day = last_data_day(parts)
     recent_from = last_day - pd.Timedelta(days=RECENT_DAYS - 1)
     grids = {r: region_grid(r, grid_deg) for r in regions}
@@ -538,7 +678,7 @@ def build(raw: Path, store: Path, model: Path, web: Path, skip_ingest=False, yea
                 continue
             t0 = time.time()
             cube, ev, recent = harmonize_partition(store, parts, region, year, cals, bb, factors, grids[region],
-                                                   recent_from)
+                                                   recent_from, gaps)
             if len(cube):
                 cube.to_parquet(model / "cube" / region / f"{year}.parquet", index=False)
             if len(ev):
@@ -550,7 +690,7 @@ def build(raw: Path, store: Path, model: Path, web: Path, skip_ingest=False, yea
             (model / "recent").mkdir(parents=True, exist_ok=True)
             pd.concat(recent_parts, ignore_index=True).to_parquet(model / "recent" / f"{region}.parquet", index=False)
     log(f"6/6 web data (month to date: 1-{last_day.day} {last_day:%B})")
-    mtd = {r: month_to_date(store, parts, r, cals, bb, last_day.month, last_day.day, grids[r]) for r in regions}
+    mtd = {r: month_to_date(store, parts, r, cals, bb, last_day.month, last_day.day, grids[r], gaps) for r in regions}
     write_web(web, model, regions, grids, last_day, report, mtd, bb)
     log(f"done in {(time.time() - t_start) / 60:.0f} min: web data in {web / 'data'}")
     return report

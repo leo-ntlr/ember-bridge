@@ -237,13 +237,20 @@ def _year_spread(miss: pd.DataFrame, keys: list[str], min_pred: float = 20.0) ->
 
 def fit_from_tables(ratio: pd.DataFrame, miss: pd.DataFrame, source: str, reference: str = REFERENCE,
                     n_boot: int = 200, min_cell_days: int = 30, min_seen: int = 50, seed: int = 0,
-                    meta: dict | None = None) -> Calibration:
-    """Fit source -> reference weights from (concatenated) fit_tables outputs."""
+                    meta: dict | None = None, no_hour: bool = False) -> Calibration:
+    """Fit source -> reference weights from (concatenated) fit_tables outputs.
+
+    no_hour=True leaves the pass-hour bins out (an ablation test): every lookup falls back to the
+    level without them, for the bin ratios and for the missed-fire correction alike.
+    """
     if ratio.empty or ratio["n_src"].sum() == 0 or ratio["n_ref"].sum() == 0:
         raise ValueError(f"No overlapping {source}/{reference} data in the selected period")
     rng = np.random.default_rng(seed)
     ratio_levels = []
     for keys in BIN_LEVELS:
+        if no_hour and "hour_bin" in keys:
+            ratio_levels.append(pd.DataFrame(columns=keys + ["n_cell_days", "ratio", "ratio_lo", "ratio_hi"]))
+            continue
         g = ratio.groupby(keys + ["block"], dropna=False, observed=True)[["n", "n_ref", "n_src"]].sum().reset_index()
         r = _grouped_bootstrap(g, keys, "n_ref", "n_src", n_boot, rng)
         ratio_levels.append(r.rename(columns={"value": "ratio", "lo": "ratio_lo", "hi": "ratio_hi",
@@ -275,7 +282,7 @@ def fit_from_tables(ratio: pd.DataFrame, miss: pd.DataFrame, source: str, refere
         r = r.assign(missed=r["value"] - 1, missed_lo=lo - 1, missed_hi=hi - 1, spread=spread)
         missed_levels.append(r[keys + ["seen", "missed", "missed_lo", "missed_hi", "spread"]])
     return Calibration(source, reference, ratio_levels, missed_levels, min_cell_days, min_seen,
-                       {"cell_days": int(miss["n"].sum()), "n_boot": n_boot, **(meta or {})})
+                       {"cell_days": int(miss["n"].sum()), "n_boot": n_boot, "hour_bins": not no_hour, **(meta or {})})
 
 
 def fit(df: pd.DataFrame, source: str, reference: str = REFERENCE, start: str | None = None,

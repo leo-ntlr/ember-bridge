@@ -32,15 +32,44 @@ def annual(cube: dict, key: str) -> dict:
     return out
 
 
+OUTAGE = ("2024-07-24", "2024-08-01")              # like Suomi NPP's real outage of July 2024
+
+
 def test_build(tmp: Path):
-    synthetic_raw.write(tmp / "raw", fires_per_day=1.5)
+    synthetic_raw.write(tmp / "raw", fires_per_day=1.5, snpp_outages=[OUTAGE])
     build_module.CUBE_ROWS_PER_FILE = 1_000        # small files, so that the split into several files is tested
+    build_module.GAP_MIN = 15                      # synthetic days have a few dozen hotspots, real ones thousands
     report = build(tmp / "raw", tmp / "store", tmp / "model", tmp / "web", n_boot=20, workers=2)
     ts = report["Aqua_time_split_test"]
     print({k: ts[k] for k in ("months", "median_abs_pct_error_harmonized", "median_abs_pct_error_raw",
                               "interval_coverage_pct")})
     assert ts["months"] > 20 and ts["median_abs_pct_error_harmonized"] < 20 < ts["median_abs_pct_error_raw"]
     assert all(f"Aqua_unseen_region_{r}" in report for r in ("canada", "amazon", "southern_africa"))
+    for name in ("Aqua_time_split_test_no_hour_bin", "Aqua_early_years_test", "Aqua_early_years_test_no_hour_bin"):
+        v = report[name]
+        print(name, {k: v[k] for k in ("months", "median_abs_pct_error_harmonized", "total_bias_pct")})
+        assert v["months"] > 20 and v["median_abs_pct_error_harmonized"] < 20 < v["median_abs_pct_error_raw"]
+    assert report["Aqua_early_years_test"]["test"].startswith("2012-01-20..2015")
+
+    # Suomi NPP outage: found against NOAA-20, and NOAA-20 fills it in the calendar
+    print("outage days found:", report["snpp_outage_days"].get("canada"))
+    found = build_module.gaps_from_report(report).get("canada", build_module.NO_DAYS)
+    outage = build_module.pd.date_range(*OUTAGE)
+    assert outage.isin(found).sum() >= 7, found
+    assert (~found.isin(outage)).sum() < 25, found            # and not much else
+    assert report["snpp_outage_ranges"]
+    meta0 = json.loads((tmp / "web" / "data" / "meta.json").read_text())
+    c0 = load_cube(tmp / "web" / "data", "canada", meta0)
+    july = {}
+    for i, t in enumerate(c0["t"]):
+        if t % 12 == 6 and 2019 <= 2000 + t // 12 <= 2025:
+            y = 2000 + t // 12
+            p, n = july.get(y, (0.0, 0))
+            july[y] = (p + c0["pred"][i], n + c0["raw"]["NOAA20"][i])
+    share = {y: round(p / n, 3) for y, (p, n) in july.items()}
+    print("July calendar / raw NOAA-20:", share)
+    others = sorted(v for y, v in share.items() if y != 2024)
+    assert abs(share[2024] / others[len(others) // 2] - 1) < 0.12, share
     ing = (tmp / "store" / "_ingest_report.csv").read_text()
     assert "static_mask_removed" in ing
 

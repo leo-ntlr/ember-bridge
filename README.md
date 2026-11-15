@@ -82,11 +82,17 @@ hundreds of millions of detections fit on a laptop:
 2. **fit tables**: for each region-year, cell-day pairs (0.25 degree cells) of Aqua, Terra and NOAA-20
    with Suomi NPP, reduced to small additive tables.
 3. **fit**: Aqua, Terra and NOAA-20 -> Suomi NPP calibrations.
-4. **validate**: trained on 2012-2022 and tested on 2023 to 2026-11-01, for whole regions and for
-   1 degree cells (about 100 km, the size of an area drawn in the app); trained on two regions and tested
-   on the third. Report: `data/model/validation.json`.
+4. **validate**: trained on 2012-2022 and tested on 2023 to 2026-11-01 (Aqua's pass had drifted later
+   in the day by then); trained on 2016 onwards and tested on 2012-2015 (Aqua still at 13:30, as in
+   2002-2012 when the calendar uses it); both with and without the pass-hour bins, for whole regions and
+   for 1 degree cells (about 100 km, the size of an area drawn in the app); trained on two regions and
+   tested on the third. Suomi NPP outage days are left out. Report: `data/model/validation.json`.
 5. **harmonize**: weights for every backbone hotspot (Terra 2000-11 to 2002-07, Aqua to 2012-01, Suomi
-   NPP to 2026-11-01, NOAA-20 after), monthly cube on a 0.25 degree grid, fire events.
+   NPP to 2026-11-01, NOAA-20 after), monthly cube on a 0.25 degree grid, fire events. On Suomi NPP
+   outage days, NOAA-20 hotspots (same orbit, 50 minutes ahead) stand in, harmonized to Suomi NPP: a day
+   is an outage day when, over all regions together, Suomi NPP saw less than half of what NOAA-20 saw.
+   NASA reported outages from 26 July to 10 August 2022, from 24 July to 2 August 2024 and from 10 to
+   17 July 2026; without the fill, the calendar was up to 46 % too low in those months.
 6. **web**: compact JSON in `web/data/`, with the monthly cube split into files of about 5 MB so that
    any static host accepts them.
 
