@@ -51,7 +51,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 .hint, .note { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
 
 .mapcard { padding: 0; overflow: hidden; }
-#map { height: 430px; background: #fff; }
+#map { height: 430px; background: #fff; isolation: isolate; }  /* keeps Leaflet controls under the sticky header */
 .selbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 14px 0; }
 .sel-label strong { font-size: 15px; }
 .circle-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; padding: 8px 14px 0; }
