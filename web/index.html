@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ember Bridge · Harmonized fire calendar</title>
+<meta name="description" content="One fire history, whatever the satellite: a harmonized MODIS + VIIRS burning-activity calendar for emergency managers (NASA Space Apps 2026).">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="vendor/leaflet-draw/leaflet.draw.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 64 64" aria-hidden="true">
+      <path d="M6 46 Q32 14 58 46" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+      <path d="M32 52c-7 0-11-5-11-10 0-7 6-10 8-17 4 4 3 8 3 8s3-3 3-9c6 5 8 11 8 17 0 6-4 11-11 11z" fill="#e8590c"/>
+      <path d="M32 52c-3 0-5-2-5-5 0-3 3-5 4-8 2 2 2 4 2 4s2-1 2-3c2 2 3 4 3 7 0 3-2 5-6 5z" fill="#fcc419"/>
+    </svg>
+    <div>
+      <h1>Ember Bridge</h1>
+      <p class="tagline">One fire history, whatever the satellite</p>
+    </div>
+  </div>
+  <nav class="regions" id="regions" aria-label="Region"></nav>
+  <div class="fresh" id="fresh" role="status"></div>
+</header>
+
+<main class="layout">
+  <section class="mapcol" aria-label="Area selection">
+    <div class="card mapcard">
+      <div id="map" role="application" aria-label="Map. Draw a polygon or a rectangle to choose an area."></div>
+      <div class="selbar">
+        <div class="sel-label"><span class="kicker">Area</span> <strong id="selLabel">Whole region</strong></div>
+        <button type="button" id="resetSel" class="ghost">Whole region</button>
+      </div>
+      <form id="circleForm" class="circle-form" aria-label="Area from coordinates">
+        <label>Lat <input id="cLat" type="number" step="0.01" min="-90" max="90" required></label>
+        <label>Lon <input id="cLon" type="number" step="0.01" min="-180" max="180" required></label>
+        <label>Radius km <input id="cRad" type="number" step="5" min="5" max="1000" value="50" required></label>
+        <button type="submit">Use circle</button>
+      </form>
+      <p class="hint">Draw with the polygon or rectangle tool on the map, type coordinates, or pick a watched area below.</p>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Watchlist</h2><span class="kicker" id="watchMonth"></span></div>
+      <p class="hint">Sensitive areas ranked by how unusual the selected month is (harmonized hotspots vs the median of the same month in earlier years).</p>
+      <div class="table-wrap"><table id="watch" class="watch"></table></div>
+    </div>
+  </section>
+
+  <section class="calcol" aria-label="Burning-activity calendar">
+    <div class="controls card">
+      <div class="seg" role="group" aria-label="Series">
+        <span class="kicker">Series</span>
+        <button type="button" data-view="harm" aria-pressed="true">Harmonized</button>
+        <button type="button" data-view="raw" aria-pressed="false">Raw: every satellite</button>
+      </div>
+      <div class="seg" role="group" aria-label="Count">
+        <span class="kicker">Count</span>
+        <button type="button" data-metric="hotspots" aria-pressed="true">Hotspots</button>
+        <button type="button" data-metric="fires" aria-pressed="false">Fires</button>
+      </div>
+      <div class="seg" role="group" aria-label="Colour">
+        <span class="kicker">Colour</span>
+        <button type="button" data-mode="counts" aria-pressed="true">Counts</button>
+        <button type="button" data-mode="anomaly" aria-pressed="false">Anomaly</button>
+      </div>
+      <div class="seg" role="group" aria-label="Period">
+        <span class="kicker">Years</span>
+        <select id="yFrom" aria-label="First year"></select><span aria-hidden="true">to</span><select id="yTo" aria-label="Last year"></select>
+      </div>
+      <div class="seg" role="group" aria-label="Selected month">
+        <span class="kicker">Month</span>
+        <select id="fMonth" aria-label="Selected month"></select><select id="fYear" aria-label="Selected year"></select>
+      </div>
+    </div>
+
+    <div class="highlights" id="highlights" aria-label="Stories"></div>
+
+    <div class="card calendar-card">
+      <div class="card-head">
+        <h2 id="calTitle">Burning-activity calendar</h2>
+        <div class="legend" id="legend"></div>
+      </div>
+      <div id="calendar" class="calendar"></div>
+      <p class="note" id="calNote"></p>
+    </div>
+
+    <div class="cards">
+      <article class="card" id="anomalyCard" aria-live="polite"></article>
+      <article class="card" id="fireCard" aria-live="polite"></article>
+      <article class="card wide" id="briefCard"></article>
+      <article class="card" id="seasonCard"></article>
+      <article class="card" id="analogCard"></article>
+    </div>
+
+    <div class="card downloads">
+      <div class="card-head"><h2>Download</h2></div>
+      <div class="buttons">
+        <button type="button" id="dlCalendar">Calendar (CSV)</button>
+        <button type="button" id="dlHotspots">Hotspots of the last 31 days (CSV)</button>
+        <button type="button" id="dlPng">Calendar image (PNG)</button>
+      </div>
+      <p class="hint" id="dlNote">Every export carries the satellite, the harmonization weight and its 95% range, for the selected area.
+        The full hotspot archive is exported with the open-source package: <code>python -m ember_bridge.export</code>.</p>
+    </div>
+
+    <div class="card method" id="method"></div>
+  </section>
+</main>
+
+<footer class="foot">
+  <p><strong>Data.</strong> We acknowledge the use of data and/or imagery from NASA's Fire Information for Resource Management System (FIRMS)
+    (<a href="https://earthdata.nasa.gov/firms">earthdata.nasa.gov/firms</a>), part of NASA's Land, Atmosphere Near real-time Capability for Earth observations
+    (LANCE) and NASA's Earth Science Data and Information System (ESDIS). MODIS Collection 6.1 (Terra, Aqua) and VIIRS 375 m (Suomi NPP, NOAA-20, NOAA-21) active fires.</p>
+  <p><strong>Map.</strong> We acknowledge the use of imagery provided by services from NASA's Global Imagery Browse Services (GIBS),
+    part of NASA's Earth Science Data and Information System (ESDIS): Blue Marble Next Generation and VIIRS NOAA-20 Corrected Reflectance.
+    Street map and place names: &copy; OpenStreetMap contributors, &copy; CARTO.</p>
+  <p>Ember Bridge, NASA Space Apps Challenge 2026, "Harmonization of MODIS and VIIRS Hot Spots". Open source. Colours: cividis (colour-vision-deficiency safe).</p>
+</footer>
+
+<div id="tip" class="tip" role="tooltip" hidden></div>
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="vendor/leaflet-draw/leaflet.draw.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

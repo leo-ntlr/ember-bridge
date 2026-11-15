@@ -1,0 +1,29 @@
+{
+  "canada": [
+    {"name": "Fort McMurray, AB", "lat": 56.73, "lon": -111.38, "radius_km": 80},
+    {"name": "Jasper National Park, AB", "lat": 52.87, "lon": -118.08, "radius_km": 60},
+    {"name": "Okanagan (Kelowna), BC", "lat": 49.89, "lon": -119.50, "radius_km": 60},
+    {"name": "Fraser Canyon (Lytton), BC", "lat": 50.23, "lon": -121.58, "radius_km": 50},
+    {"name": "Yellowknife, NT", "lat": 62.45, "lon": -114.37, "radius_km": 80},
+    {"name": "Prince Albert National Park, SK", "lat": 53.97, "lon": -106.37, "radius_km": 60},
+    {"name": "Chibougamau, QC", "lat": 49.91, "lon": -74.37, "radius_km": 100},
+    {"name": "Halifax region, NS", "lat": 44.65, "lon": -63.57, "radius_km": 50}
+  ],
+  "amazon": [
+    {"name": "Altamira and the Xingu, PA", "lat": -3.20, "lon": -52.21, "radius_km": 120},
+    {"name": "Novo Progresso (BR-163), PA", "lat": -7.04, "lon": -55.42, "radius_km": 100},
+    {"name": "Porto Velho, RO", "lat": -8.76, "lon": -63.90, "radius_km": 100},
+    {"name": "Labrea, southern Amazonas", "lat": -7.26, "lon": -64.80, "radius_km": 100},
+    {"name": "Yanomami Territory, RR", "lat": 2.50, "lon": -63.50, "radius_km": 120},
+    {"name": "Northern Pantanal (Pocone), MT", "lat": -16.26, "lon": -56.62, "radius_km": 80}
+  ],
+  "southern_africa": [
+    {"name": "Kafue National Park, Zambia", "lat": -15.00, "lon": 26.00, "radius_km": 120},
+    {"name": "Liuwa Plain, Zambia", "lat": -14.50, "lon": 22.60, "radius_km": 80},
+    {"name": "Moxico miombo, Angola", "lat": -12.00, "lon": 21.00, "radius_km": 150},
+    {"name": "Upemba National Park, DR Congo", "lat": -9.00, "lon": 26.80, "radius_km": 100},
+    {"name": "Niassa Special Reserve, Mozambique", "lat": -12.00, "lon": 37.50, "radius_km": 120},
+    {"name": "Ruaha National Park, Tanzania", "lat": -7.70, "lon": 34.90, "radius_km": 100},
+    {"name": "Nkhotakota, Malawi", "lat": -12.90, "lon": 34.10, "radius_km": 60}
+  ]
+}

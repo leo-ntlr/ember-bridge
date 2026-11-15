@@ -1,0 +1,9 @@
+# secrets and local data: never commit
+.env
+data/
+logs/
+.venv/
+__pycache__/
+*.pyc
+*.part
+web/data/
